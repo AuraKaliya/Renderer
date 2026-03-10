@@ -22,8 +22,34 @@ public:
 private:
     class Viewport final : public QOpenGLWindow, protected QOpenGLExtraFunctions {
     public:
+        static constexpr int kSceneObjectCount = 3;
+
         Viewport();
         ~Viewport() override;
+
+        void resetDefaults();
+        void applySphereFocusPreset();
+
+        void setObjectVisible(int index, bool visible);
+        [[nodiscard]] bool objectVisible(int index) const;
+
+        void setObjectRotationSpeed(int index, float speed);
+        [[nodiscard]] float objectRotationSpeed(int index) const;
+
+        void setObjectColor(int index, const renderer::scene_contract::ColorRgba& color);
+        [[nodiscard]] renderer::scene_contract::ColorRgba objectColor(int index) const;
+
+        void setAmbientStrength(float strength);
+        [[nodiscard]] float ambientStrength() const;
+
+        void setLightDirection(const renderer::scene_contract::Vec3f& direction);
+        [[nodiscard]] renderer::scene_contract::Vec3f lightDirection() const;
+
+        void setCameraDistance(float distance);
+        [[nodiscard]] float cameraDistance() const;
+
+        void setVerticalFovDegrees(float degrees);
+        [[nodiscard]] float verticalFovDegrees() const;
 
     protected:
         void initializeGL() override;
@@ -39,9 +65,18 @@ private:
             renderer::scene_contract::MaterialHandle materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
             renderer::scene_contract::MeshData meshData;
             renderer::scene_contract::MaterialData materialData;
+            float offsetX = 0.0F;
+            float offsetY = 0.0F;
+            float offsetZ = 0.0F;
+            float scale = 1.0F;
+            float rotationSpeed = 1.0F;
+            bool visible = true;
         };
 
         std::array<SceneObject, 3> sceneObjects_ {};
+        renderer::scene_contract::DirectionalLightData light_ {};
+        float cameraDistance_ = 6.8F;
+        float verticalFovDegrees_ = 50.0F;
         renderer::render_core::SceneRepository repository_;
         renderer::render_core::FrameAssembler assembler_;
         renderer::render_core::FramePacket framePacket_;
@@ -50,4 +85,8 @@ private:
         QTimer frameTimer_;
         QElapsedTimer animationClock_;
     };
+
+    QWidget* buildControlPanel();
+
+    Viewport* viewport_ = nullptr;
 };

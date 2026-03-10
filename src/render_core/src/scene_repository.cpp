@@ -13,15 +13,15 @@ void SceneRepository::clear() {
     items_.clear();
 }
 
-void SceneRepository::updateMeshHandle(
-    ItemId id,
-    scene_contract::MeshHandle meshHandle) {
+void SceneRepository::updateMeshHandle(ItemId id, scene_contract::MeshHandle meshHandle) {
     if (id >= items_.size()) {
         return;
     }
 
     items_[id].meshHandle = meshHandle;
 }
+
+
 
 void SceneRepository::updateMaterialHandle(
     ItemId id,

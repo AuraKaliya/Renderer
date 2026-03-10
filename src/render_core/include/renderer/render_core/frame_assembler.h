@@ -8,6 +8,7 @@ namespace renderer::render_core {
 
 struct FramePacket {
     scene_contract::CameraData camera;
+    scene_contract::DirectionalLightData light {};
     std::vector<scene_contract::RenderableItem> opaqueItems;
     scene_contract::RenderTargetDesc target {};
 };

@@ -42,7 +42,8 @@ void appendTriangle(
 scene_contract::MeshData PrimitiveFactory::makeBox(
     float width,
     float height,
-    float depth) {
+    float depth)
+{
     const float hx = width * 0.5F;
     const float hy = height * 0.5F;
     const float hz = depth * 0.5F;

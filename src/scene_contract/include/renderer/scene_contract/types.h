@@ -69,6 +69,12 @@ struct CameraData {
     Vec3f position {};
 };
 
+struct DirectionalLightData {
+    Vec3f direction {-0.4F, -1.0F, -0.35F};
+    Vec3f color {1.0F, 0.98F, 0.92F};
+    float ambientStrength = 0.24F;
+};
+
 struct RenderableItem {
     MeshHandle meshHandle = kInvalidMeshHandle;
     MaterialHandle materialHandle = kInvalidMaterialHandle;
@@ -77,6 +83,7 @@ struct RenderableItem {
 
 struct FrameScene {
     CameraData camera;
+    DirectionalLightData light {};
     std::vector<RenderableItem> items;
 };
 

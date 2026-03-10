@@ -550,9 +550,17 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
 
     impl_->gl.UniformMatrix4fv(impl_->viewLocation, 1, GL_FALSE, packet.camera.view.elements);
     impl_->gl.UniformMatrix4fv(impl_->projectionLocation, 1, GL_FALSE, packet.camera.projection.elements);
-    impl_->gl.Uniform3f(impl_->lightDirectionLocation, -0.4F, -1.0F, -0.35F);
-    impl_->gl.Uniform3f(impl_->lightColorLocation, 1.0F, 0.98F, 0.92F);
-    impl_->gl.Uniform1f(impl_->ambientStrengthLocation, 0.24F);
+    impl_->gl.Uniform3f(
+        impl_->lightDirectionLocation,
+        packet.light.direction.x,
+        packet.light.direction.y,
+        packet.light.direction.z);
+    impl_->gl.Uniform3f(
+        impl_->lightColorLocation,
+        packet.light.color.x,
+        packet.light.color.y,
+        packet.light.color.z);
+    impl_->gl.Uniform1f(impl_->ambientStrengthLocation, packet.light.ambientStrength);
 
     for (const auto& item : packet.opaqueItems) {
         if (item.meshHandle == scene_contract::kInvalidMeshHandle) {
