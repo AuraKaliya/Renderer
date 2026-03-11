@@ -60,6 +60,8 @@ private:
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;
 
+        [[nodiscard]] renderer::scene_contract::Aabb objectLocalBounds(int index) const;
+
     protected:
         void initializeGL() override;
         void resizeGL(int width, int height) override;

@@ -37,6 +37,56 @@ void appendTriangle(
     mesh.indices.push_back(baseIndex + 2U);
 }
 
+scene_contract::Aabb makeAabb(
+    float minX,
+    float minY,
+    float minZ,
+    float maxX,
+    float maxY,
+    float maxZ)
+{
+    scene_contract::Aabb bounds;
+    bounds.min = {minX, minY, minZ};
+    bounds.max = {maxX, maxY, maxZ};
+    bounds.valid = true;
+    return bounds;
+}
+
+scene_contract::Aabb computeBoundsFromVertices(const std::vector<scene_contract::VertexPNT>& vertices) {
+    scene_contract::Aabb bounds;
+    if (vertices.empty()) {
+        return bounds;
+    }
+
+    bounds.min = vertices.front().position;
+    bounds.max = vertices.front().position;
+    bounds.valid = true;
+
+    for (const auto& vertex : vertices) {
+        const auto& position = vertex.position;
+        if (position.x < bounds.min.x) {
+            bounds.min.x = position.x;
+        }
+        if (position.y < bounds.min.y) {
+            bounds.min.y = position.y;
+        }
+        if (position.z < bounds.min.z) {
+            bounds.min.z = position.z;
+        }
+        if (position.x > bounds.max.x) {
+            bounds.max.x = position.x;
+        }
+        if (position.y > bounds.max.y) {
+            bounds.max.y = position.y;
+        }
+        if (position.z > bounds.max.z) {
+            bounds.max.z = position.z;
+        }
+    }
+
+    return bounds;
+}
+
 }  // namespace
 
 scene_contract::MeshData PrimitiveFactory::makeBox(
@@ -89,6 +139,7 @@ scene_contract::MeshData PrimitiveFactory::makeBox(
         16, 17, 18, 16, 18, 19,
         20, 21, 22, 20, 22, 23
     };
+    mesh.localBounds = makeAabb(-hx, -hy, -hz, hx, hy, hz);
 
     return mesh;
 }
@@ -149,6 +200,8 @@ scene_contract::MeshData PrimitiveFactory::makeCylinder(
             makeVertex(nextX, -halfHeight, nextZ, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F));
     }
 
+    mesh.localBounds = makeAabb(-radius, -halfHeight, -radius, radius, halfHeight, radius);
+
     return mesh;
 }
 
@@ -200,6 +253,8 @@ scene_contract::MeshData PrimitiveFactory::makeSphere(
             mesh.indices.push_back(next + 1U);
         }
     }
+
+    mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
 
     return mesh;
 }

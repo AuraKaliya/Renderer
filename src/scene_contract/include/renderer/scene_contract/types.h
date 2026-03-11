@@ -34,6 +34,12 @@ struct Vec4f {
     float w = 1.0F;
 };
 
+struct Aabb {
+    Vec3f min {};
+    Vec3f max {};
+    bool valid = false;
+};
+
 struct Mat4f {
     float elements[16] = {
         1.0F, 0.0F, 0.0F, 0.0F,
@@ -59,6 +65,7 @@ struct VertexPNT {
 struct MeshData {
     std::vector<VertexPNT> vertices;
     std::vector<std::uint32_t> indices;
+    Aabb localBounds {};
 };
 
 struct TextureData {

@@ -422,6 +422,14 @@ float ViewerWindow::Viewport::verticalFovDegrees() const {
     return cameraController_.verticalFovDegrees();
 }
 
+renderer::scene_contract::Aabb ViewerWindow::Viewport::objectLocalBounds(int index) const {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return {};
+    }
+
+    return sceneObjects_[index].meshData.localBounds;
+}
+
 ViewerWindow::Viewport::~Viewport() {
     if (context() == nullptr) {
         return;
@@ -478,6 +486,7 @@ void ViewerWindow::Viewport::initializeGL() {
         item.meshHandle = sceneObject.meshHandle;
         item.materialHandle = sceneObject.materialHandle;
         sceneObject.itemId = repository_.add(item);
+        repository_.updateLocalBounds(sceneObject.itemId, sceneObject.meshData.localBounds);
     }
     cameraController_.setViewportSize(width(), height());
     rebuildFramePacket();
@@ -677,6 +686,9 @@ void ViewerWindow::syncControlPanel() {
             viewport_->objectVisible(index),
             viewport_->objectRotationSpeed(index),
             viewport_->objectColor(index));
+        controlPanel_->setObjectBounds(
+            index,
+            viewport_->objectLocalBounds(index));
     }
 
     controlPanel_->setLightingState(

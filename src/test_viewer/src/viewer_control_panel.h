@@ -4,6 +4,8 @@
 
 #include <QWidget>
 
+class QLabel;
+
 #include "camera_control_widget.h"
 #include "lighting_control_widget.h"
 #include "scene_object_control_widget.h"
@@ -18,6 +20,7 @@ public:
     explicit ViewerControlPanel(QWidget* parent = nullptr);
 
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
+    void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(float distance, float verticalFovDegrees);
 
@@ -34,6 +37,7 @@ signals:
 
 private:
     std::array<SceneObjectControlWidget*, kSceneObjectCount> objectWidgets_ {};
+    std::array<QLabel*, kSceneObjectCount> objectBoundsLabels_ {};
     LightingControlWidget* lightingWidget_ = nullptr;
     CameraControlWidget* cameraWidget_ = nullptr;
 };

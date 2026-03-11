@@ -1,8 +1,29 @@
 #include "viewer_control_panel.h"
 
 #include <QGroupBox>
+#include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
+
+namespace {
+
+QString formatBoundsText(const QString& name, const renderer::scene_contract::Aabb& bounds) {
+    if (!bounds.valid) {
+        return QStringLiteral("%1: invalid").arg(name);
+    }
+
+    return QStringLiteral(
+               "%1\nmin(%2, %3, %4)\nmax(%5, %6, %7)")
+        .arg(name)
+        .arg(bounds.min.x, 0, 'f', 2)
+        .arg(bounds.min.y, 0, 'f', 2)
+        .arg(bounds.min.z, 0, 'f', 2)
+        .arg(bounds.max.x, 0, 'f', 2)
+        .arg(bounds.max.y, 0, 'f', 2)
+        .arg(bounds.max.z, 0, 'f', 2);
+}
+
+}  // namespace
 
 ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     : QWidget(parent)
@@ -53,6 +74,16 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     auto* actionGroup = new QGroupBox("Actions", this);
     auto* actionLayout = new QVBoxLayout(actionGroup);
 
+    auto* boundsGroup = new QGroupBox("Bounds", this);
+    auto* boundsLayout = new QVBoxLayout(boundsGroup);
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        auto* label = new QLabel(boundsGroup);
+        label->setWordWrap(true);
+        label->setTextFormat(Qt::PlainText);
+        objectBoundsLabels_[index] = label;
+        boundsLayout->addWidget(label);
+    }
+
     auto* resetButton = new QPushButton("Reset Defaults", actionGroup);
     connect(resetButton, &QPushButton::clicked, this, [this]() {
         emit resetDefaultsRequested();
@@ -68,6 +99,7 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     rootLayout->addWidget(lightingWidget_);
     rootLayout->addWidget(cameraWidget_);
+    rootLayout->addWidget(boundsGroup);
     rootLayout->addWidget(actionGroup);
     rootLayout->addStretch(1);
 }
@@ -82,6 +114,20 @@ void ViewerControlPanel::setObjectState(
         return;
     }
     objectWidgets_[index]->setObjectState(visible, rotationSpeed, color);
+}
+
+void ViewerControlPanel::setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    static const std::array<const char*, kSceneObjectCount> kObjectNames = {
+        "Box",
+        "Cylinder",
+        "Sphere"
+    };
+
+    objectBoundsLabels_[index]->setText(formatBoundsText(QString::fromLatin1(kObjectNames[index]), bounds));
 }
 
 void ViewerControlPanel::setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection) {
