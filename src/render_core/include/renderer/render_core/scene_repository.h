@@ -9,6 +9,11 @@ namespace renderer::render_core {
 
 struct ItemRangeData {
     scene_contract::Aabb localBounds {};
+    scene_contract::Aabb worldBounds {};
+};
+
+struct SceneRangeData {
+    scene_contract::Aabb worldBounds {};
 };
 
 class SceneRepository {
@@ -24,6 +29,7 @@ public:
 
     [[nodiscard]] ItemRangeData rangeData(ItemId id) const;
     [[nodiscard]] std::vector<ItemRangeData> snapshotRangeData() const;
+    [[nodiscard]] SceneRangeData sceneRangeData() const;
 
     [[nodiscard]] scene_contract::FrameScene snapshot(
         const scene_contract::CameraData& camera) const;

@@ -26,6 +26,8 @@ public:
     void rotate(float deltaYawRadians, float deltaPitchRadians);
     void zoom(float deltaDistance);
     void pan(float deltaRight, float deltaUp);
+    void focusOnPoint(const renderer::scene_contract::Vec3f& point);
+    void focusOnBounds(const renderer::scene_contract::Aabb& bounds);
 
     void setNearPlane(float value);
     [[nodiscard]] float nearPlane() const;

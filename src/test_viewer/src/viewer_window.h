@@ -60,6 +60,11 @@ private:
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;
 
+        void setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter);
+        [[nodiscard]] renderer::scene_contract::Vec3f orbitCenter() const;
+        void focusOnPoint(const renderer::scene_contract::Vec3f& point);
+        void focusOnScene();
+
         [[nodiscard]] renderer::scene_contract::Aabb objectLocalBounds(int index) const;
 
     protected:

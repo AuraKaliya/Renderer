@@ -134,6 +134,10 @@ void ViewerControlPanel::setLightingState(float ambientStrength, const renderer:
     lightingWidget_->setLightingState(ambientStrength, lightDirection);
 }
 
-void ViewerControlPanel::setCameraState(float distance, float verticalFovDegrees) {
-    cameraWidget_->setCameraState(distance, verticalFovDegrees);
+void ViewerControlPanel::setCameraState(
+    float distance,
+    float verticalFovDegrees,
+    const renderer::scene_contract::Vec3f& orbitCenter)
+{
+    cameraWidget_->setCameraState(distance, verticalFovDegrees, orbitCenter);
 }

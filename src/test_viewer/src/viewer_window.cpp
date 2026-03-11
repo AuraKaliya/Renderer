@@ -422,6 +422,25 @@ float ViewerWindow::Viewport::verticalFovDegrees() const {
     return cameraController_.verticalFovDegrees();
 }
 
+void ViewerWindow::Viewport::setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter) {
+    cameraController_.setOrbitCenter(orbitCenter);
+    update();
+}
+
+renderer::scene_contract::Vec3f ViewerWindow::Viewport::orbitCenter() const {
+    return cameraController_.orbitCenter();
+}
+
+void ViewerWindow::Viewport::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
+    cameraController_.focusOnPoint(point);
+    update();
+}
+
+void ViewerWindow::Viewport::focusOnScene() {
+    cameraController_.focusOnBounds(repository_.sceneRangeData().worldBounds);
+    update();
+}
+
 renderer::scene_contract::Aabb ViewerWindow::Viewport::objectLocalBounds(int index) const {
     if (index < 0 || index >= kSceneObjectCount) {
         return {};
@@ -696,5 +715,6 @@ void ViewerWindow::syncControlPanel() {
         viewport_->lightDirection());
     controlPanel_->setCameraState(
         viewport_->cameraDistance(),
-        viewport_->verticalFovDegrees());
+        viewport_->verticalFovDegrees(),
+        viewport_->orbitCenter());
 }

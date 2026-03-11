@@ -22,7 +22,10 @@ public:
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
     void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
-    void setCameraState(float distance, float verticalFovDegrees);
+    void setCameraState(
+        float distance,
+        float verticalFovDegrees,
+        const renderer::scene_contract::Vec3f& orbitCenter);
 
 signals:
     void objectVisibleChanged(int index, bool visible);

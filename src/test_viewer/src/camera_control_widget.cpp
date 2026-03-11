@@ -3,8 +3,20 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QLabel>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
+
+namespace {
+
+QString formatOrbitCenterText(const renderer::scene_contract::Vec3f& orbitCenter) {
+    return QStringLiteral("(%1, %2, %3)")
+        .arg(orbitCenter.x, 0, 'f', 2)
+        .arg(orbitCenter.y, 0, 'f', 2)
+        .arg(orbitCenter.z, 0, 'f', 2);
+}
+
+}  // namespace
 
 CameraControlWidget::CameraControlWidget(QWidget* parent)
     : QWidget(parent)
@@ -31,16 +43,25 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
         emit verticalFovDegreesChanged(static_cast<float>(value));
     });
 
+    orbitCenterLabel_ = new QLabel(group);
+    orbitCenterLabel_->setTextFormat(Qt::PlainText);
+
     formLayout->addRow("Distance", distanceSpinBox_);
     formLayout->addRow("Vertical FOV", fovSpinBox_);
+    formLayout->addRow("Orbit Center", orbitCenterLabel_);
 
     rootLayout->addWidget(group);
 }
 
-void CameraControlWidget::setCameraState(float distance, float verticalFovDegrees) {
+void CameraControlWidget::setCameraState(
+    float distance,
+    float verticalFovDegrees,
+    const renderer::scene_contract::Vec3f& orbitCenter)
+{
     const QSignalBlocker distanceBlocker(distanceSpinBox_);
     const QSignalBlocker fovBlocker(fovSpinBox_);
 
     distanceSpinBox_->setValue(distance);
     fovSpinBox_->setValue(verticalFovDegrees);
+    orbitCenterLabel_->setText(formatOrbitCenterText(orbitCenter));
 }

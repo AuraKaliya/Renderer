@@ -64,6 +64,14 @@ float clampPitchRadians(float radians) {
     return radians;
 }
 
+renderer::scene_contract::Vec3f aabbCenter(const renderer::scene_contract::Aabb& bounds) {
+    return {
+        (bounds.min.x + bounds.max.x) * 0.5F,
+        (bounds.min.y + bounds.max.y) * 0.5F,
+        (bounds.min.z + bounds.max.z) * 0.5F
+    };
+}
+
 }  // namespace
 
 void OrbitCameraController::setViewportSize(int width, int height) {
@@ -146,6 +154,18 @@ void OrbitCameraController::pan(float deltaRight, float deltaUp) {
     orbitCenter_ = add(
         orbitCenter_,
         add(scale(right, deltaRight), scale(up, deltaUp)));
+}
+
+void OrbitCameraController::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
+    setOrbitCenter(point);
+}
+
+void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& bounds) {
+    if (!bounds.valid) {
+        return;
+    }
+
+    focusOnPoint(aabbCenter(bounds));
 }
 
 void OrbitCameraController::setNearPlane(float value) {
