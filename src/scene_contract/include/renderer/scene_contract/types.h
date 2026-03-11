@@ -9,6 +9,12 @@ using MeshHandle = std::uint32_t;
 constexpr MeshHandle kInvalidMeshHandle = 0U;
 using MaterialHandle = std::uint32_t;
 constexpr MaterialHandle kInvalidMaterialHandle = 0U;
+using TextureHandle = std::uint32_t;
+constexpr TextureHandle kInvalidTextureHandle = 0U;
+
+enum class TextureFormat : std::uint8_t {
+    rgba8
+};
 
 struct Vec2f {
     float x = 0.0F;
@@ -55,8 +61,18 @@ struct MeshData {
     std::vector<std::uint32_t> indices;
 };
 
+struct TextureData {
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    TextureFormat format = TextureFormat::rgba8;
+    bool generateMipmaps = false;
+    std::vector<std::uint8_t> pixels;
+};
+
 struct MaterialData {
     ColorRgba baseColor {};
+    TextureHandle baseColorTexture = kInvalidTextureHandle;
+    bool useBaseColorTexture = false;
 };
 
 struct TransformData {

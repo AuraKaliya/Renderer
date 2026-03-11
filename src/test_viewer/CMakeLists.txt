@@ -7,8 +7,24 @@ endif()
 
 add_executable(test_viewer
     src/main.cpp
+    src/camera.h
+    src/camera.cpp
+    src/orbit_camera_controller.h
+    src/orbit_camera_controller.cpp
+    src/lighting_control_widget.h
+    src/lighting_control_widget.cpp
+    src/camera_control_widget.h
+    src/camera_control_widget.cpp
+    src/scene_object_control_widget.h
+    src/scene_object_control_widget.cpp
+    src/viewer_control_panel.h
+    src/viewer_control_panel.cpp
     src/viewer_window.h
     src/viewer_window.cpp
+)
+
+set_target_properties(test_viewer PROPERTIES
+    AUTOMOC ON
 )
 
 target_link_libraries(test_viewer

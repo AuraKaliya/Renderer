@@ -24,15 +24,18 @@ constexpr auto kVertexShaderSource = R"(
 #version 330 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexcoord;
 
 uniform mat4 uWorld;
 uniform mat4 uView;
 uniform mat4 uProjection;
 
 out vec3 vWorldNormal;
+out vec2 vTexcoord;
 
 void main() {
     vWorldNormal = mat3(uWorld) * aNormal;
+    vTexcoord = aTexcoord;
     gl_Position = uProjection * uView * uWorld * vec4(aPosition, 1.0);
 }
 )";
@@ -45,22 +48,30 @@ uniform vec4 uBaseColor;
 uniform vec3 uLightDirection;
 uniform vec3 uLightColor;
 uniform float uAmbientStrength;
+uniform sampler2D uBaseColorTexture;
+uniform int uUseBaseColorTexture;
 
 in vec3 vWorldNormal;
+in vec2 vTexcoord;
 
 void main() {
     vec3 normal = normalize(vWorldNormal);
     vec3 lightDir = normalize(-uLightDirection);
     float diffuse = max(dot(normal, lightDir), 0.0);
-    vec3 ambient = uAmbientStrength * uBaseColor.rgb;
-    vec3 litColor = ambient + diffuse * uBaseColor.rgb * uLightColor;
-    FragColor = vec4(litColor, uBaseColor.a);
+    vec4 albedo = uBaseColor;
+    if (uUseBaseColorTexture == 1) {
+        albedo *= texture(uBaseColorTexture, vTexcoord);
+    }
+    vec3 ambient = uAmbientStrength * albedo.rgb;
+    vec3 litColor = ambient + diffuse * albedo.rgb * uLightColor;
+    FragColor = vec4(litColor, albedo.a);
 }
 )";
 
 static_assert(sizeof(scene_contract::VertexPNT) == sizeof(float) * 8);
 
 struct GlFunctions {
+    PFNGLACTIVETEXTUREPROC ActiveTexture = nullptr;
     PFNGLATTACHSHADERPROC AttachShader = nullptr;
     PFNGLBINDBUFFERPROC BindBuffer = nullptr;
     PFNGLBINDVERTEXARRAYPROC BindVertexArray = nullptr;
@@ -74,6 +85,7 @@ struct GlFunctions {
     PFNGLDELETEVERTEXARRAYSPROC DeleteVertexArrays = nullptr;
     PFNGLENABLEVERTEXATTRIBARRAYPROC EnableVertexAttribArray = nullptr;
     PFNGLGENBUFFERSPROC GenBuffers = nullptr;
+    PFNGLGENERATEMIPMAPPROC GenerateMipmap = nullptr;
     PFNGLGENVERTEXARRAYSPROC GenVertexArrays = nullptr;
     PFNGLGETPROGRAMINFOLOGPROC GetProgramInfoLog = nullptr;
     PFNGLGETPROGRAMIVPROC GetProgramiv = nullptr;
@@ -83,6 +95,7 @@ struct GlFunctions {
     PFNGLLINKPROGRAMPROC LinkProgram = nullptr;
     PFNGLSHADERSOURCEPROC ShaderSource = nullptr;
     PFNGLUNIFORM1FPROC Uniform1f = nullptr;
+    PFNGLUNIFORM1IPROC Uniform1i = nullptr;
     PFNGLUNIFORM3FPROC Uniform3f = nullptr;
     PFNGLUNIFORM4FPROC Uniform4f = nullptr;
     PFNGLUNIFORMMATRIX4FVPROC UniformMatrix4fv = nullptr;
@@ -192,6 +205,72 @@ struct MaterialResource {
     scene_contract::MaterialData material;
 };
 
+struct TextureResource {
+    GLuint textureId = 0U;
+    scene_contract::TextureData descriptor;
+};
+
+bool uploadTextureResource(
+    const GlFunctions& gl,
+    const scene_contract::TextureData& textureData,
+    TextureResource& resource,
+    std::string& error)
+{
+    if (textureData.width <= 0 || textureData.height <= 0) {
+        error = "Texture upload requires positive width and height.";
+        return false;
+    }
+
+    if (textureData.format != scene_contract::TextureFormat::rgba8) {
+        error = "Only rgba8 textures are currently supported.";
+        return false;
+    }
+
+    const std::size_t expectedSize =
+        static_cast<std::size_t>(textureData.width) *
+        static_cast<std::size_t>(textureData.height) * 4U;
+    if (textureData.pixels.size() != expectedSize) {
+        error = "Texture pixel data size does not match width/height/format.";
+        return false;
+    }
+
+    if (resource.textureId == 0U) {
+        ::glGenTextures(1, &resource.textureId);
+    }
+
+    ::glBindTexture(GL_TEXTURE_2D, resource.textureId);
+    ::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, textureData.generateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    ::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    ::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    ::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    ::glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGBA8,
+        textureData.width,
+        textureData.height,
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        textureData.pixels.data());
+
+    if (textureData.generateMipmaps) {
+        gl.GenerateMipmap(GL_TEXTURE_2D);
+    }
+
+    ::glBindTexture(GL_TEXTURE_2D, 0);
+    resource.descriptor = textureData;
+    error.clear();
+    return true;
+}
+
+void destroyTextureResource(TextureResource& resource) {
+    if (resource.textureId != 0U) {
+        ::glDeleteTextures(1, &resource.textureId);
+        resource.textureId = 0U;
+    }
+}
+
 bool uploadMeshResource(
     const GlFunctions& gl,
     const scene_contract::MeshData& mesh,
@@ -246,6 +325,15 @@ bool uploadMeshResource(
         static_cast<GLsizei>(sizeof(scene_contract::VertexPNT)),
         reinterpret_cast<const void*>(offsetof(scene_contract::VertexPNT, normal)));
 
+    gl.EnableVertexAttribArray(2);
+    gl.VertexAttribPointer(
+        2,
+        2,
+        GL_FLOAT,
+        GL_FALSE,
+        static_cast<GLsizei>(sizeof(scene_contract::VertexPNT)),
+        reinterpret_cast<const void*>(offsetof(scene_contract::VertexPNT, texcoord)));
+
     gl.BindVertexArray(0);
     resource.indexCount = static_cast<GLsizei>(mesh.indices.size());
     error.clear();
@@ -277,13 +365,17 @@ struct GlRenderer::Impl {
     GLint viewLocation = -1;
     GLint projectionLocation = -1;
     GLint colorLocation = -1;
+    GLint baseColorTextureLocation = -1;
+    GLint useBaseColorTextureLocation = -1;
     GLint lightDirectionLocation = -1;
     GLint lightColorLocation = -1;
     GLint ambientStrengthLocation = -1;
     scene_contract::MeshHandle nextMeshHandle = 1U;
     scene_contract::MaterialHandle nextMaterialHandle = 1U;
+    scene_contract::TextureHandle nextTextureHandle = 1U;
     std::unordered_map<scene_contract::MeshHandle, MeshResource> meshes;
     std::unordered_map<scene_contract::MaterialHandle, MaterialResource> materials;
+    std::unordered_map<scene_contract::TextureHandle, TextureResource> textures;
     bool initialized = false;
 };
 #else
@@ -315,7 +407,8 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
 
     auto impl = std::make_unique<Impl>();
 
-    if (!loadFunction(impl->gl.AttachShader, resolver, userData, "glAttachShader", lastError_) ||
+    if (!loadFunction(impl->gl.ActiveTexture, resolver, userData, "glActiveTexture", lastError_) ||
+        !loadFunction(impl->gl.AttachShader, resolver, userData, "glAttachShader", lastError_) ||
         !loadFunction(impl->gl.BindBuffer, resolver, userData, "glBindBuffer", lastError_) ||
         !loadFunction(impl->gl.BindVertexArray, resolver, userData, "glBindVertexArray", lastError_) ||
         !loadFunction(impl->gl.BufferData, resolver, userData, "glBufferData", lastError_) ||
@@ -328,6 +421,7 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
         !loadFunction(impl->gl.DeleteVertexArrays, resolver, userData, "glDeleteVertexArrays", lastError_) ||
         !loadFunction(impl->gl.EnableVertexAttribArray, resolver, userData, "glEnableVertexAttribArray", lastError_) ||
         !loadFunction(impl->gl.GenBuffers, resolver, userData, "glGenBuffers", lastError_) ||
+        !loadFunction(impl->gl.GenerateMipmap, resolver, userData, "glGenerateMipmap", lastError_) ||
         !loadFunction(impl->gl.GenVertexArrays, resolver, userData, "glGenVertexArrays", lastError_) ||
         !loadFunction(impl->gl.GetProgramInfoLog, resolver, userData, "glGetProgramInfoLog", lastError_) ||
         !loadFunction(impl->gl.GetProgramiv, resolver, userData, "glGetProgramiv", lastError_) ||
@@ -337,6 +431,7 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
         !loadFunction(impl->gl.LinkProgram, resolver, userData, "glLinkProgram", lastError_) ||
         !loadFunction(impl->gl.ShaderSource, resolver, userData, "glShaderSource", lastError_) ||
         !loadFunction(impl->gl.Uniform1f, resolver, userData, "glUniform1f", lastError_) ||
+        !loadFunction(impl->gl.Uniform1i, resolver, userData, "glUniform1i", lastError_) ||
         !loadFunction(impl->gl.Uniform3f, resolver, userData, "glUniform3f", lastError_) ||
         !loadFunction(impl->gl.Uniform4f, resolver, userData, "glUniform4f", lastError_) ||
         !loadFunction(impl->gl.UniformMatrix4fv, resolver, userData, "glUniformMatrix4fv", lastError_) ||
@@ -354,6 +449,8 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
     impl->viewLocation = impl->gl.GetUniformLocation(impl->program, "uView");
     impl->projectionLocation = impl->gl.GetUniformLocation(impl->program, "uProjection");
     impl->colorLocation = impl->gl.GetUniformLocation(impl->program, "uBaseColor");
+    impl->baseColorTextureLocation = impl->gl.GetUniformLocation(impl->program, "uBaseColorTexture");
+    impl->useBaseColorTextureLocation = impl->gl.GetUniformLocation(impl->program, "uUseBaseColorTexture");
     impl->lightDirectionLocation = impl->gl.GetUniformLocation(impl->program, "uLightDirection");
     impl->lightColorLocation = impl->gl.GetUniformLocation(impl->program, "uLightColor");
     impl->ambientStrengthLocation = impl->gl.GetUniformLocation(impl->program, "uAmbientStrength");
@@ -375,8 +472,13 @@ void GlRenderer::shutdown() {
         (void)handle;
         destroyMeshResource(impl_->gl, mesh);
     }
+    for (auto& [handle, texture] : impl_->textures) {
+        (void)handle;
+        destroyTextureResource(texture);
+    }
     impl_->meshes.clear();
     impl_->materials.clear();
+    impl_->textures.clear();
 
     if (impl_->program != 0U) {
         impl_->gl.DeleteProgram(impl_->program);
@@ -527,6 +629,76 @@ void GlRenderer::releaseMaterial(scene_contract::MaterialHandle handle) {
 #endif
 }
 
+scene_contract::TextureHandle GlRenderer::uploadTexture(
+    const scene_contract::TextureData& texture) {
+#if !defined(RENDERER_HAS_OPENGL)
+    (void)texture;
+    lastError_ = "OpenGL support is not available for render_gl.";
+    return scene_contract::kInvalidTextureHandle;
+#else
+    if (impl_ == nullptr || !impl_->initialized) {
+        lastError_ = "GlRenderer::initialize must be called before uploadTexture.";
+        return scene_contract::kInvalidTextureHandle;
+    }
+
+    const auto handle = impl_->nextTextureHandle++;
+    TextureResource resource;
+    if (!uploadTextureResource(impl_->gl, texture, resource, lastError_)) {
+        destroyTextureResource(resource);
+        return scene_contract::kInvalidTextureHandle;
+    }
+    impl_->textures.emplace(handle, resource);
+    lastError_.clear();
+    return handle;
+#endif
+}
+
+bool GlRenderer::updateTexture(
+    scene_contract::TextureHandle handle,
+    const scene_contract::TextureData& texture) {
+#if !defined(RENDERER_HAS_OPENGL)
+    (void)handle;
+    (void)texture;
+    lastError_ = "OpenGL support is not available for render_gl.";
+    return false;
+#else
+    if (impl_ == nullptr || !impl_->initialized) {
+        lastError_ = "GlRenderer::initialize must be called before updateTexture.";
+        return false;
+    }
+
+    const auto iterator = impl_->textures.find(handle);
+    if (iterator == impl_->textures.end()) {
+        lastError_ = "updateTexture received an unknown TextureHandle.";
+        return false;
+    }
+
+    if (!uploadTextureResource(impl_->gl, texture, iterator->second, lastError_)) {
+        return false;
+    }
+    lastError_.clear();
+    return true;
+#endif
+}
+
+void GlRenderer::releaseTexture(scene_contract::TextureHandle handle) {
+#if defined(RENDERER_HAS_OPENGL)
+    if (impl_ == nullptr || !impl_->initialized) {
+        return;
+    }
+
+    const auto iterator = impl_->textures.find(handle);
+    if (iterator == impl_->textures.end()) {
+        return;
+    }
+
+    destroyTextureResource(iterator->second);
+    impl_->textures.erase(iterator);
+#else
+    (void)handle;
+#endif
+}
+
 RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
     RenderStats stats;
 #if !defined(RENDERER_HAS_OPENGL)
@@ -561,6 +733,7 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
         packet.light.color.y,
         packet.light.color.z);
     impl_->gl.Uniform1f(impl_->ambientStrengthLocation, packet.light.ambientStrength);
+    impl_->gl.Uniform1i(impl_->baseColorTextureLocation, 0);
 
     for (const auto& item : packet.opaqueItems) {
         if (item.meshHandle == scene_contract::kInvalidMeshHandle) {
@@ -592,6 +765,24 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
             material.baseColor.b,
             material.baseColor.a);
 
+        bool useTexture = false;
+        if (material.useBaseColorTexture &&
+            material.baseColorTexture != scene_contract::kInvalidTextureHandle) {
+            const auto textureIterator = impl_->textures.find(material.baseColorTexture);
+            if (textureIterator != impl_->textures.end() &&
+                textureIterator->second.textureId != 0U) {
+                useTexture = true;
+                impl_->gl.ActiveTexture(GL_TEXTURE0);
+                ::glBindTexture(GL_TEXTURE_2D, textureIterator->second.textureId);
+            }
+        }
+
+        impl_->gl.Uniform1i(impl_->useBaseColorTextureLocation, useTexture ? 1 : 0);
+        if (!useTexture) {
+            impl_->gl.ActiveTexture(GL_TEXTURE0);
+            ::glBindTexture(GL_TEXTURE_2D, 0);
+        }
+
 
         ::glDrawElements(
             GL_TRIANGLES,
@@ -603,6 +794,8 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
         stats.triangleCount += static_cast<std::uint32_t>(mesh.indexCount / 3U);
     }
 
+    impl_->gl.ActiveTexture(GL_TEXTURE0);
+    ::glBindTexture(GL_TEXTURE_2D, 0);
     impl_->gl.BindVertexArray(0);
     impl_->gl.UseProgram(0);
     lastError_.clear();

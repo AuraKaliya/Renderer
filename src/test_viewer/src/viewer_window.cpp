@@ -1,18 +1,15 @@
 #include "viewer_window.h"
 
+#include <cmath>
 #include <utility>
 
-#include <QCheckBox>
-#include <QDoubleSpinBox>
-#include <QFormLayout>
-#include <QGroupBox>
 #include <QHBoxLayout>
+#include <QFocusEvent>
+#include <QMouseEvent>
 #include <QOpenGLContext>
-#include <QPushButton>
-#include <QSignalBlocker>
 #include <QSurfaceFormat>
 #include <QDebug>
-#include <QVBoxLayout>
+#include <QWheelEvent>
 #include <QWidget>
 
 #include "renderer/scene_contract/math_utils.h"
@@ -54,6 +51,16 @@ constexpr float kDefaultCameraDistance = 6.8F;
 constexpr float kDefaultVerticalFovDegrees = 50.0F;
 constexpr float kSphereFocusCameraDistance = 5.2F;
 constexpr float kSphereFocusVerticalFovDegrees = 38.0F;
+constexpr float kDefaultNearPlane = 0.1F;
+constexpr float kDefaultFarPlane = 100.0F;
+constexpr float kDefaultCameraHeight = 1.1F;
+constexpr float kDefaultCameraTargetY = 0.2F;
+const float kDefaultCameraPitchRadians = std::atan2(
+    kDefaultCameraHeight - kDefaultCameraTargetY,
+    kDefaultCameraDistance);
+constexpr float kOrbitRotateSensitivity = 0.0125F;
+constexpr float kWheelZoomStep = 0.35F;
+constexpr float kPanViewportFactor = 1.0F;
 
 renderer::render_gl::ProcAddress resolveGlProc(const char* name, void* userData) {
     (void)userData;
@@ -85,30 +92,6 @@ renderer::scene_contract::TransformData makeSceneTransform(
     return transform;
 }
 
-renderer::scene_contract::CameraData makeCamera(
-    int viewportWidth,
-    int viewportHeight,
-    float cameraDistance,
-    float verticalFovDegrees)
-{
-    renderer::scene_contract::CameraData camera;
-    const float aspectRatio = viewportHeight > 0
-        ? static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)
-        : 1.0F;
-
-    camera.position = {0.0F, 1.1F, cameraDistance};
-    camera.view = renderer::scene_contract::math::makeLookAt(
-        camera.position,
-        {0.0F, 0.2F, 0.0F},
-        {0.0F, 1.0F, 0.0F});
-    camera.projection = renderer::scene_contract::math::makePerspective(
-        verticalFovDegrees * renderer::scene_contract::math::kPi / 180.0F,
-        aspectRatio,
-        0.1F,
-        100.0F);
-    return camera;
-}
-
 renderer::scene_contract::RenderableItem makeItem() {
     renderer::scene_contract::RenderableItem item;
     item.transform = makeSceneTransform(0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F);
@@ -124,6 +107,40 @@ renderer::scene_contract::ColorRgba makeColorFromRgbSpin(double red, double gree
     };
 }
 
+renderer::scene_contract::TextureData makeCheckerTextureData(
+    std::int32_t width,
+    std::int32_t height,
+    std::uint8_t cellSize)
+{
+    renderer::scene_contract::TextureData texture;
+    texture.width = width;
+    texture.height = height;
+    texture.format = renderer::scene_contract::TextureFormat::rgba8;
+    texture.generateMipmaps = true;
+    texture.pixels.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U, 255U);
+
+    for (std::int32_t y = 0; y < height; ++y) {
+        for (std::int32_t x = 0; x < width; ++x) {
+            const bool evenCell = (((x / cellSize) + (y / cellSize)) % 2) == 0;
+            const std::size_t index =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4U;
+            if (evenCell) {
+                texture.pixels[index + 0] = 245U;
+                texture.pixels[index + 1] = 238U;
+                texture.pixels[index + 2] = 214U;
+                texture.pixels[index + 3] = 255U;
+            } else {
+                texture.pixels[index + 0] = 52U;
+                texture.pixels[index + 1] = 110U;
+                texture.pixels[index + 2] = 168U;
+                texture.pixels[index + 3] = 255U;
+            }
+        }
+    }
+
+    return texture;
+}
+
 QSurfaceFormat makeFormat() {
     QSurfaceFormat format;
     format.setDepthBufferSize(24);
@@ -136,28 +153,66 @@ QSurfaceFormat makeFormat() {
 }  // namespace
 
 ViewerWindow::ViewerWindow() {
-    viewport_ = new Viewport();
+    viewport_ = new Viewport([this]() {
+        syncControlPanel();
+    });
+    controlPanel_ = new ViewerControlPanel(this);
 
     auto* centralWidget = new QWidget(this);
     auto* layout = new QHBoxLayout(centralWidget);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    auto* viewportContainer = QWidget::createWindowContainer(viewport_, centralWidget);
-    viewportContainer->setFocusPolicy(Qt::StrongFocus);
-    layout->addWidget(viewportContainer, 1);
-    layout->addWidget(buildControlPanel());
+    viewport_->setFocusPolicy(Qt::StrongFocus);
+    layout->addWidget(viewport_, 1);
+    layout->addWidget(controlPanel_);
+
+    connect(controlPanel_, &ViewerControlPanel::objectVisibleChanged, this, [this](int index, bool visible) {
+        viewport_->setObjectVisible(index, visible);
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectRotationSpeedChanged, this, [this](int index, float speed) {
+        viewport_->setObjectRotationSpeed(index, speed);
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectColorChanged, this, [this](int index, float red, float green, float blue) {
+        viewport_->setObjectColor(index, makeColorFromRgbSpin(red, green, blue));
+    });
+    connect(controlPanel_, &ViewerControlPanel::ambientStrengthChanged, this, [this](float strength) {
+        viewport_->setAmbientStrength(strength);
+    });
+    connect(controlPanel_, &ViewerControlPanel::lightDirectionChanged, this, [this](float x, float y, float z) {
+        viewport_->setLightDirection({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
+        viewport_->setCameraDistance(distance);
+    });
+    connect(controlPanel_, &ViewerControlPanel::verticalFovDegreesChanged, this, [this](float degrees) {
+        viewport_->setVerticalFovDegrees(degrees);
+    });
+    connect(controlPanel_, &ViewerControlPanel::resetDefaultsRequested, this, [this]() {
+        viewport_->resetDefaults();
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::focusSphereRequested, this, [this]() {
+        viewport_->applySphereFocusPreset();
+        syncControlPanel();
+    });
 
     setCentralWidget(centralWidget);
     resize(1280, 720);
     setWindowTitle("Renderer Test Viewer");
+    syncControlPanel();
 }
 
-ViewerWindow::Viewport::Viewport() {
+ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallback)
+    : cameraStateChangedCallback_(std::move(cameraStateChangedCallback))
+{
     setFormat(makeFormat());
+    setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
     sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::makeBox(1.0F, 1.0F, 1.0F);
+    sceneObjects_[0].textureData = makeCheckerTextureData(64, 64, 8U);
     sceneObjects_[0].materialData.baseColor = kDefaultSceneObjects[0].color;
+    sceneObjects_[0].materialData.useBaseColorTexture = true;
     sceneObjects_[0].offsetX = kDefaultSceneObjects[0].offsetX;
     sceneObjects_[0].offsetY = kDefaultSceneObjects[0].offsetY;
     sceneObjects_[0].offsetZ = kDefaultSceneObjects[0].offsetZ;
@@ -184,8 +239,11 @@ ViewerWindow::Viewport::Viewport() {
     sceneObjects_[2].visible = kDefaultSceneObjects[2].visible;
 
     light_ = kDefaultLight;
-    cameraDistance_ = kDefaultCameraDistance;
-    verticalFovDegrees_ = kDefaultVerticalFovDegrees;
+    cameraController_.setOrbitCenter({0.0F, kDefaultCameraTargetY, 0.0F});
+    cameraController_.setDistance(kDefaultCameraDistance);
+    cameraController_.setProjection(kDefaultVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
+    cameraController_.setYawRadians(0.0F);
 
     animationClock_.start();
 
@@ -198,8 +256,11 @@ ViewerWindow::Viewport::Viewport() {
 
 void ViewerWindow::Viewport::resetDefaults() {
     light_ = kDefaultLight;
-    cameraDistance_ = kDefaultCameraDistance;
-    verticalFovDegrees_ = kDefaultVerticalFovDegrees;
+    cameraController_.setOrbitCenter({0.0F, kDefaultCameraTargetY, 0.0F});
+    cameraController_.setDistance(kDefaultCameraDistance);
+    cameraController_.setProjection(kDefaultVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
+    cameraController_.setYawRadians(0.0F);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         const auto& defaults = kDefaultSceneObjects[index];
@@ -224,8 +285,10 @@ void ViewerWindow::Viewport::resetDefaults() {
 
 void ViewerWindow::Viewport::applySphereFocusPreset() {
     light_ = kSphereFocusLight;
-    cameraDistance_ = kSphereFocusCameraDistance;
-    verticalFovDegrees_ = kSphereFocusVerticalFovDegrees;
+    cameraController_.setDistance(kSphereFocusCameraDistance);
+    cameraController_.setProjection(kSphereFocusVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
+    cameraController_.setYawRadians(0.0F);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         auto& sceneObject = sceneObjects_[index];
@@ -254,6 +317,11 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     sceneObjects_[2].visible = true;
     sceneObjects_[2].rotationSpeed = 1.75F;
     sceneObjects_[2].materialData.baseColor = {0.45F, 0.86F, 0.78F, 1.0F};
+    cameraController_.setOrbitCenter({
+        sceneObjects_[2].offsetX,
+        sceneObjects_[2].offsetY,
+        sceneObjects_[2].offsetZ
+    });
 
     if (renderer_.isInitialized() &&
         sceneObjects_[2].materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
@@ -337,29 +405,21 @@ renderer::scene_contract::Vec3f ViewerWindow::Viewport::lightDirection() const {
 }
 
 void ViewerWindow::Viewport::setCameraDistance(float distance) {
-    if (distance < 1.5F) {
-        distance = 1.5F;
-    }
-    cameraDistance_ = distance;
+    cameraController_.setDistance(distance);
     update();
 }
 
 float ViewerWindow::Viewport::cameraDistance() const {
-    return cameraDistance_;
+    return cameraController_.distance();
 }
 
 void ViewerWindow::Viewport::setVerticalFovDegrees(float degrees) {
-    if (degrees < 20.0F) {
-        degrees = 20.0F;
-    } else if (degrees > 90.0F) {
-        degrees = 90.0F;
-    }
-    verticalFovDegrees_ = degrees;
+    cameraController_.setVerticalFovDegrees(degrees);
     update();
 }
 
 float ViewerWindow::Viewport::verticalFovDegrees() const {
-    return verticalFovDegrees_;
+    return cameraController_.verticalFovDegrees();
 }
 
 ViewerWindow::Viewport::~Viewport() {
@@ -377,6 +437,10 @@ ViewerWindow::Viewport::~Viewport() {
             renderer_.releaseMaterial(sceneObject.materialHandle);
             sceneObject.materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
         }
+        if (sceneObject.textureHandle != renderer::scene_contract::kInvalidTextureHandle) {
+            renderer_.releaseTexture(sceneObject.textureHandle);
+            sceneObject.textureHandle = renderer::scene_contract::kInvalidTextureHandle;
+        }
     }
     renderer_.shutdown();
     doneCurrent();
@@ -388,6 +452,15 @@ void ViewerWindow::Viewport::initializeGL() {
         qWarning() << "Failed to initialize render_gl:" << QString::fromStdString(renderer_.lastError());
     } else {
         for (auto& sceneObject : sceneObjects_) {
+            if (!sceneObject.textureData.pixels.empty()) {
+                sceneObject.textureHandle = renderer_.uploadTexture(sceneObject.textureData);
+                if (sceneObject.textureHandle == renderer::scene_contract::kInvalidTextureHandle) {
+                    qWarning() << "Failed to upload scene texture:" << QString::fromStdString(renderer_.lastError());
+                } else {
+                    sceneObject.materialData.baseColorTexture = sceneObject.textureHandle;
+                }
+            }
+
             sceneObject.meshHandle = renderer_.uploadMesh(sceneObject.meshData);
             if (sceneObject.meshHandle == renderer::scene_contract::kInvalidMeshHandle) {
                 qWarning() << "Failed to upload scene mesh:" << QString::fromStdString(renderer_.lastError());
@@ -406,6 +479,7 @@ void ViewerWindow::Viewport::initializeGL() {
         item.materialHandle = sceneObject.materialHandle;
         sceneObject.itemId = repository_.add(item);
     }
+    cameraController_.setViewportSize(width(), height());
     rebuildFramePacket();
 }
 
@@ -414,6 +488,8 @@ void ViewerWindow::Viewport::resizeGL(int width, int height) {
         offscreenTarget_.reset();
         return;
     }
+
+    cameraController_.setViewportSize(width, height);
 
     offscreenTarget_ = std::make_unique<QOpenGLFramebufferObject>(
         width,
@@ -449,6 +525,113 @@ void ViewerWindow::Viewport::paintGL() {
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 }
 
+void ViewerWindow::Viewport::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        rotating_ = true;
+        panning_ = false;
+        lastMousePosition_ = event->pos();
+        setFocus(Qt::MouseFocusReason);
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::RightButton) {
+        panning_ = true;
+        rotating_ = false;
+        lastMousePosition_ = event->pos();
+        setFocus(Qt::MouseFocusReason);
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mousePressEvent(event);
+}
+
+void ViewerWindow::Viewport::mouseMoveEvent(QMouseEvent* event) {
+    if (rotating_ && (event->buttons() & Qt::LeftButton)) {
+        const QPoint delta = event->pos() - lastMousePosition_;
+        lastMousePosition_ = event->pos();
+
+        cameraController_.rotate(
+            -static_cast<float>(delta.x()) * kOrbitRotateSensitivity,
+            -static_cast<float>(delta.y()) * kOrbitRotateSensitivity);
+
+        if (cameraStateChangedCallback_) {
+            cameraStateChangedCallback_();
+        }
+        update();
+        event->accept();
+        return;
+    }
+
+    if (panning_ && (event->buttons() & Qt::RightButton)) {
+        const QPoint delta = event->pos() - lastMousePosition_;
+        lastMousePosition_ = event->pos();
+
+        if (height() > 0) {
+            const float halfFovRadians = cameraController_.verticalFovDegrees() * 0.5F * 3.14159265358979323846F / 180.0F;
+            const float worldUnitsPerPixel =
+                2.0F * cameraController_.distance() * std::tan(halfFovRadians) / static_cast<float>(height());
+
+            cameraController_.pan(
+                -static_cast<float>(delta.x()) * worldUnitsPerPixel * kPanViewportFactor,
+                static_cast<float>(delta.y()) * worldUnitsPerPixel * kPanViewportFactor);
+        }
+
+        if (cameraStateChangedCallback_) {
+            cameraStateChangedCallback_();
+        }
+        update();
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mouseMoveEvent(event);
+}
+
+void ViewerWindow::Viewport::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        rotating_ = false;
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::RightButton) {
+        panning_ = false;
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::mouseReleaseEvent(event);
+}
+
+void ViewerWindow::Viewport::leaveEvent(QEvent* event) {
+    rotating_ = false;
+    panning_ = false;
+    QOpenGLWidget::leaveEvent(event);
+}
+
+void ViewerWindow::Viewport::focusOutEvent(QFocusEvent* event) {
+    rotating_ = false;
+    panning_ = false;
+    QOpenGLWidget::focusOutEvent(event);
+}
+
+void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
+    const QPoint angleDelta = event->angleDelta();
+    if (angleDelta.y() == 0) {
+        QOpenGLWidget::wheelEvent(event);
+        return;
+    }
+
+    cameraController_.zoom(-static_cast<float>(angleDelta.y()) / 120.0F * kWheelZoomStep);
+    if (cameraStateChangedCallback_) {
+        cameraStateChangedCallback_();
+    }
+    update();
+    event->accept();
+}
+
 void ViewerWindow::Viewport::rebuildFramePacket() {
     const float elapsedSeconds = static_cast<float>(animationClock_.elapsed()) / 1000.0F;
     for (auto& sceneObject : sceneObjects_) {
@@ -463,7 +646,7 @@ void ViewerWindow::Viewport::rebuildFramePacket() {
                 sceneObject.rotationSpeed));
     }
 
-    auto scene = repository_.snapshot(makeCamera(width(), height(), cameraDistance_, verticalFovDegrees_));
+    auto scene = repository_.snapshot(cameraController_.buildCameraData());
     scene.light = light_;
 
     std::vector<renderer::scene_contract::RenderableItem> visibleItems;
@@ -483,242 +666,23 @@ void ViewerWindow::Viewport::rebuildFramePacket() {
     framePacket_ = assembler_.build(scene, {width(), height()});
 }
 
-QWidget* ViewerWindow::buildControlPanel() {
-    static const std::array<const char*, kSceneObjectCount> kObjectNames = {
-        "Box",
-        "Cylinder",
-        "Sphere"
-    };
-
-    auto* panel = new QWidget(this);
-    panel->setFixedWidth(320);
-
-    auto* rootLayout = new QVBoxLayout(panel);
-    rootLayout->setContentsMargins(12, 12, 12, 12);
-    rootLayout->setSpacing(10);
-
-    std::array<QCheckBox*, kSceneObjectCount> visibleCheckBoxes {};
-    std::array<QDoubleSpinBox*, kSceneObjectCount> speedSpinBoxes {};
-    std::array<QDoubleSpinBox*, kSceneObjectCount> redSpinBoxes {};
-    std::array<QDoubleSpinBox*, kSceneObjectCount> greenSpinBoxes {};
-    std::array<QDoubleSpinBox*, kSceneObjectCount> blueSpinBoxes {};
-
-    for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
-        auto* group = new QGroupBox(QString::fromLatin1(kObjectNames[index]), panel);
-        auto* formLayout = new QFormLayout(group);
-
-        auto* visibleCheckBox = new QCheckBox(group);
-        visibleCheckBox->setChecked(viewport_->objectVisible(index));
-        connect(visibleCheckBox, &QCheckBox::toggled, this, [this, index](bool checked) {
-            viewport_->setObjectVisible(index, checked);
-        });
-        visibleCheckBoxes[index] = visibleCheckBox;
-
-        auto* speedSpinBox = new QDoubleSpinBox(group);
-        speedSpinBox->setRange(-5.0, 5.0);
-        speedSpinBox->setSingleStep(0.05);
-        speedSpinBox->setDecimals(2);
-        speedSpinBox->setValue(viewport_->objectRotationSpeed(index));
-        connect(speedSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, index](double value) {
-            viewport_->setObjectRotationSpeed(index, static_cast<float>(value));
-        });
-        speedSpinBoxes[index] = speedSpinBox;
-
-        const auto color = viewport_->objectColor(index);
-
-        auto* redSpinBox = new QDoubleSpinBox(group);
-        redSpinBox->setRange(0.0, 1.0);
-        redSpinBox->setSingleStep(0.05);
-        redSpinBox->setDecimals(2);
-        redSpinBox->setValue(color.r);
-        redSpinBoxes[index] = redSpinBox;
-
-        auto* greenSpinBox = new QDoubleSpinBox(group);
-        greenSpinBox->setRange(0.0, 1.0);
-        greenSpinBox->setSingleStep(0.05);
-        greenSpinBox->setDecimals(2);
-        greenSpinBox->setValue(color.g);
-        greenSpinBoxes[index] = greenSpinBox;
-
-        auto* blueSpinBox = new QDoubleSpinBox(group);
-        blueSpinBox->setRange(0.0, 1.0);
-        blueSpinBox->setSingleStep(0.05);
-        blueSpinBox->setDecimals(2);
-        blueSpinBox->setValue(color.b);
-        blueSpinBoxes[index] = blueSpinBox;
-
-        auto updateColor = [this, index, redSpinBox, greenSpinBox, blueSpinBox]() {
-            viewport_->setObjectColor(
-                index,
-                makeColorFromRgbSpin(
-                    redSpinBox->value(),
-                    greenSpinBox->value(),
-                    blueSpinBox->value()));
-        };
-
-        connect(redSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateColor](double) {
-            updateColor();
-        });
-        connect(greenSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateColor](double) {
-            updateColor();
-        });
-        connect(blueSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateColor](double) {
-            updateColor();
-        });
-
-        formLayout->addRow("Visible", visibleCheckBox);
-        formLayout->addRow("Rotation", speedSpinBox);
-        formLayout->addRow("Red", redSpinBox);
-        formLayout->addRow("Green", greenSpinBox);
-        formLayout->addRow("Blue", blueSpinBox);
-
-        rootLayout->addWidget(group);
+void ViewerWindow::syncControlPanel() {
+    if (controlPanel_ == nullptr || viewport_ == nullptr) {
+        return;
     }
 
-    auto* lightGroup = new QGroupBox("Lighting", panel);
-    auto* lightLayout = new QFormLayout(lightGroup);
+    for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
+        controlPanel_->setObjectState(
+            index,
+            viewport_->objectVisible(index),
+            viewport_->objectRotationSpeed(index),
+            viewport_->objectColor(index));
+    }
 
-    auto* ambientSpinBox = new QDoubleSpinBox(lightGroup);
-    ambientSpinBox->setRange(0.0, 1.0);
-    ambientSpinBox->setSingleStep(0.02);
-    ambientSpinBox->setDecimals(2);
-    ambientSpinBox->setValue(viewport_->ambientStrength());
-    connect(ambientSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
-        viewport_->setAmbientStrength(static_cast<float>(value));
-    });
-
-    const auto direction = viewport_->lightDirection();
-
-    auto* lightXSpinBox = new QDoubleSpinBox(lightGroup);
-    lightXSpinBox->setRange(-2.0, 2.0);
-    lightXSpinBox->setSingleStep(0.05);
-    lightXSpinBox->setDecimals(2);
-    lightXSpinBox->setValue(direction.x);
-
-    auto* lightYSpinBox = new QDoubleSpinBox(lightGroup);
-    lightYSpinBox->setRange(-2.0, 2.0);
-    lightYSpinBox->setSingleStep(0.05);
-    lightYSpinBox->setDecimals(2);
-    lightYSpinBox->setValue(direction.y);
-
-    auto* lightZSpinBox = new QDoubleSpinBox(lightGroup);
-    lightZSpinBox->setRange(-2.0, 2.0);
-    lightZSpinBox->setSingleStep(0.05);
-    lightZSpinBox->setDecimals(2);
-    lightZSpinBox->setValue(direction.z);
-
-    auto updateLightDirection = [this, lightXSpinBox, lightYSpinBox, lightZSpinBox]() {
-        viewport_->setLightDirection({
-            static_cast<float>(lightXSpinBox->value()),
-            static_cast<float>(lightYSpinBox->value()),
-            static_cast<float>(lightZSpinBox->value())
-        });
-    };
-
-    connect(lightXSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateLightDirection](double) {
-        updateLightDirection();
-    });
-    connect(lightYSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateLightDirection](double) {
-        updateLightDirection();
-    });
-    connect(lightZSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [updateLightDirection](double) {
-        updateLightDirection();
-    });
-
-    lightLayout->addRow("Ambient", ambientSpinBox);
-    lightLayout->addRow("Light X", lightXSpinBox);
-    lightLayout->addRow("Light Y", lightYSpinBox);
-    lightLayout->addRow("Light Z", lightZSpinBox);
-
-    auto* cameraGroup = new QGroupBox("Camera", panel);
-    auto* cameraLayout = new QFormLayout(cameraGroup);
-
-    auto* distanceSpinBox = new QDoubleSpinBox(cameraGroup);
-    distanceSpinBox->setRange(1.5, 20.0);
-    distanceSpinBox->setSingleStep(0.1);
-    distanceSpinBox->setDecimals(2);
-    distanceSpinBox->setValue(viewport_->cameraDistance());
-    connect(distanceSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
-        viewport_->setCameraDistance(static_cast<float>(value));
-    });
-
-    auto* fovSpinBox = new QDoubleSpinBox(cameraGroup);
-    fovSpinBox->setRange(20.0, 90.0);
-    fovSpinBox->setSingleStep(1.0);
-    fovSpinBox->setDecimals(1);
-    fovSpinBox->setValue(viewport_->verticalFovDegrees());
-    connect(fovSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
-        viewport_->setVerticalFovDegrees(static_cast<float>(value));
-    });
-
-    cameraLayout->addRow("Distance", distanceSpinBox);
-    cameraLayout->addRow("Vertical FOV", fovSpinBox);
-
-    auto syncObjectControls = [this, visibleCheckBoxes, speedSpinBoxes, redSpinBoxes, greenSpinBoxes, blueSpinBoxes](int index) {
-        const QSignalBlocker visibleBlocker(visibleCheckBoxes[index]);
-        const QSignalBlocker speedBlocker(speedSpinBoxes[index]);
-        const QSignalBlocker redBlocker(redSpinBoxes[index]);
-        const QSignalBlocker greenBlocker(greenSpinBoxes[index]);
-        const QSignalBlocker blueBlocker(blueSpinBoxes[index]);
-
-        const auto color = viewport_->objectColor(index);
-        visibleCheckBoxes[index]->setChecked(viewport_->objectVisible(index));
-        speedSpinBoxes[index]->setValue(viewport_->objectRotationSpeed(index));
-        redSpinBoxes[index]->setValue(color.r);
-        greenSpinBoxes[index]->setValue(color.g);
-        blueSpinBoxes[index]->setValue(color.b);
-    };
-
-    auto syncLightControls = [this, ambientSpinBox, lightXSpinBox, lightYSpinBox, lightZSpinBox]() {
-        const QSignalBlocker ambientBlocker(ambientSpinBox);
-        const QSignalBlocker xBlocker(lightXSpinBox);
-        const QSignalBlocker yBlocker(lightYSpinBox);
-        const QSignalBlocker zBlocker(lightZSpinBox);
-
-        const auto directionValue = viewport_->lightDirection();
-        ambientSpinBox->setValue(viewport_->ambientStrength());
-        lightXSpinBox->setValue(directionValue.x);
-        lightYSpinBox->setValue(directionValue.y);
-        lightZSpinBox->setValue(directionValue.z);
-    };
-
-    auto syncCameraControls = [this, distanceSpinBox, fovSpinBox]() {
-        const QSignalBlocker distanceBlocker(distanceSpinBox);
-        const QSignalBlocker fovBlocker(fovSpinBox);
-
-        distanceSpinBox->setValue(viewport_->cameraDistance());
-        fovSpinBox->setValue(viewport_->verticalFovDegrees());
-    };
-
-    auto* actionGroup = new QGroupBox("Actions", panel);
-    auto* actionLayout = new QVBoxLayout(actionGroup);
-
-    auto* resetButton = new QPushButton("Reset Defaults", actionGroup);
-    connect(resetButton, &QPushButton::clicked, this, [this, syncObjectControls, syncLightControls, syncCameraControls]() {
-        viewport_->resetDefaults();
-        for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
-            syncObjectControls(index);
-        }
-        syncLightControls();
-        syncCameraControls();
-    });
-
-    auto* sphereFocusButton = new QPushButton("Focus Sphere", actionGroup);
-    connect(sphereFocusButton, &QPushButton::clicked, this, [this, syncObjectControls, syncLightControls, syncCameraControls]() {
-        viewport_->applySphereFocusPreset();
-        for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
-            syncObjectControls(index);
-        }
-        syncLightControls();
-        syncCameraControls();
-    });
-
-    actionLayout->addWidget(resetButton);
-    actionLayout->addWidget(sphereFocusButton);
-
-    rootLayout->addWidget(lightGroup);
-    rootLayout->addWidget(cameraGroup);
-    rootLayout->addWidget(actionGroup);
-    rootLayout->addStretch(1);
-    return panel;
+    controlPanel_->setLightingState(
+        viewport_->ambientStrength(),
+        viewport_->lightDirection());
+    controlPanel_->setCameraState(
+        viewport_->cameraDistance(),
+        viewport_->verticalFovDegrees());
 }

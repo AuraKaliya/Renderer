@@ -1,15 +1,24 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLFramebufferObject>
-#include <QOpenGLWindow>
+#include <QOpenGLWidget>
+#include <QPoint>
 #include <QTimer>
 
+class QMouseEvent;
+class QFocusEvent;
+class QEvent;
+class QWheelEvent;
+
+#include "orbit_camera_controller.h"
+#include "viewer_control_panel.h"
 #include "renderer/render_core/frame_assembler.h"
 #include "renderer/render_core/scene_repository.h"
 #include "renderer/scene_contract/types.h"
@@ -20,11 +29,11 @@ public:
     ViewerWindow();
 
 private:
-    class Viewport final : public QOpenGLWindow, protected QOpenGLExtraFunctions {
+    class Viewport final : public QOpenGLWidget, protected QOpenGLExtraFunctions {
     public:
         static constexpr int kSceneObjectCount = 3;
 
-        Viewport();
+        explicit Viewport(std::function<void()> cameraStateChangedCallback = {});
         ~Viewport() override;
 
         void resetDefaults();
@@ -55,6 +64,12 @@ private:
         void initializeGL() override;
         void resizeGL(int width, int height) override;
         void paintGL() override;
+        void mousePressEvent(QMouseEvent* event) override;
+        void mouseMoveEvent(QMouseEvent* event) override;
+        void mouseReleaseEvent(QMouseEvent* event) override;
+        void leaveEvent(QEvent* event) override;
+        void focusOutEvent(QFocusEvent* event) override;
+        void wheelEvent(QWheelEvent* event) override;
 
     private:
         void rebuildFramePacket();
@@ -63,7 +78,9 @@ private:
             renderer::render_core::SceneRepository::ItemId itemId = 0;
             renderer::scene_contract::MeshHandle meshHandle = renderer::scene_contract::kInvalidMeshHandle;
             renderer::scene_contract::MaterialHandle materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
+            renderer::scene_contract::TextureHandle textureHandle = renderer::scene_contract::kInvalidTextureHandle;
             renderer::scene_contract::MeshData meshData;
+            renderer::scene_contract::TextureData textureData;
             renderer::scene_contract::MaterialData materialData;
             float offsetX = 0.0F;
             float offsetY = 0.0F;
@@ -75,18 +92,21 @@ private:
 
         std::array<SceneObject, 3> sceneObjects_ {};
         renderer::scene_contract::DirectionalLightData light_ {};
-        float cameraDistance_ = 6.8F;
-        float verticalFovDegrees_ = 50.0F;
+        OrbitCameraController cameraController_;
         renderer::render_core::SceneRepository repository_;
         renderer::render_core::FrameAssembler assembler_;
         renderer::render_core::FramePacket framePacket_;
         renderer::render_gl::GlRenderer renderer_;
         std::unique_ptr<QOpenGLFramebufferObject> offscreenTarget_;
+        std::function<void()> cameraStateChangedCallback_;
+        QPoint lastMousePosition_;
+        bool rotating_ = false;
+        bool panning_ = false;
         QTimer frameTimer_;
         QElapsedTimer animationClock_;
     };
-
-    QWidget* buildControlPanel();
+    void syncControlPanel();
 
     Viewport* viewport_ = nullptr;
+    ViewerControlPanel* controlPanel_ = nullptr;
 };

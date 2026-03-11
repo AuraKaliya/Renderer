@@ -44,6 +44,13 @@ public:
         const scene_contract::MaterialData& material);
     void releaseMaterial(scene_contract::MaterialHandle handle);
 
+    [[nodiscard]] scene_contract::TextureHandle uploadTexture(
+        const scene_contract::TextureData& texture);
+    [[nodiscard]] bool updateTexture(
+        scene_contract::TextureHandle handle,
+        const scene_contract::TextureData& texture);
+    void releaseTexture(scene_contract::TextureHandle handle);
+
     [[nodiscard]] RenderStats render(
         const render_core::FramePacket& packet);
 
