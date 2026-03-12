@@ -11,6 +11,8 @@ add_executable(test_viewer
     src/camera.cpp
     src/camera_clip_utils.h
     src/camera_clip_utils.cpp
+    src/camera_focus_bounds_utils.h
+    src/camera_focus_bounds_utils.cpp
     src/camera_focus_utils.h
     src/camera_focus_utils.cpp
     src/orbit_camera_controller.h

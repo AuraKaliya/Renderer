@@ -12,6 +12,7 @@
 #include <QWheelEvent>
 #include <QWidget>
 
+#include "camera_focus_bounds_utils.h"
 #include "renderer/scene_contract/math_utils.h"
 #include "renderer/parametric_model/primitive_factory.h"
 
@@ -147,76 +148,6 @@ QSurfaceFormat makeFormat() {
     format.setVersion(3, 3);
     format.setProfile(QSurfaceFormat::CoreProfile);
     return format;
-}
-
-renderer::scene_contract::Aabb mergeAabb(
-    const renderer::scene_contract::Aabb& left,
-    const renderer::scene_contract::Aabb& right)
-{
-    if (!left.valid) {
-        return right;
-    }
-    if (!right.valid) {
-        return left;
-    }
-
-    renderer::scene_contract::Aabb merged;
-    merged.min = {
-        std::min(left.min.x, right.min.x),
-        std::min(left.min.y, right.min.y),
-        std::min(left.min.z, right.min.z)
-    };
-    merged.max = {
-        std::max(left.max.x, right.max.x),
-        std::max(left.max.y, right.max.y),
-        std::max(left.max.z, right.max.z)
-    };
-    merged.valid = true;
-    return merged;
-}
-
-renderer::scene_contract::Vec3f aabbCenter(const renderer::scene_contract::Aabb& bounds) {
-    return {
-        (bounds.min.x + bounds.max.x) * 0.5F,
-        (bounds.min.y + bounds.max.y) * 0.5F,
-        (bounds.min.z + bounds.max.z) * 0.5F
-    };
-}
-
-renderer::scene_contract::Vec3f aabbHalfExtent(const renderer::scene_contract::Aabb& bounds) {
-    return {
-        (bounds.max.x - bounds.min.x) * 0.5F,
-        (bounds.max.y - bounds.min.y) * 0.5F,
-        (bounds.max.z - bounds.min.z) * 0.5F
-    };
-}
-
-renderer::scene_contract::Vec3f transformPoint(
-    const renderer::scene_contract::Mat4f& matrix,
-    const renderer::scene_contract::Vec3f& point)
-{
-    return {
-        matrix.elements[0] * point.x + matrix.elements[4] * point.y + matrix.elements[8] * point.z + matrix.elements[12],
-        matrix.elements[1] * point.x + matrix.elements[5] * point.y + matrix.elements[9] * point.z + matrix.elements[13],
-        matrix.elements[2] * point.x + matrix.elements[6] * point.y + matrix.elements[10] * point.z + matrix.elements[14]
-    };
-}
-
-float axisScaleLength(const renderer::scene_contract::Mat4f& matrix, int columnOffset) {
-    const renderer::scene_contract::Vec3f axis = {
-        matrix.elements[columnOffset + 0],
-        matrix.elements[columnOffset + 1],
-        matrix.elements[columnOffset + 2]
-    };
-    return renderer::scene_contract::math::length(axis);
-}
-
-float maxAxisScale(const renderer::scene_contract::Mat4f& matrix) {
-    return std::max({
-        axisScaleLength(matrix, 0),
-        axisScaleLength(matrix, 4),
-        axisScaleLength(matrix, 8)
-    });
 }
 
 }  // namespace
@@ -403,7 +334,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     }
 
     updateSceneTransforms();
-    cameraController_.focusOnBounds(focusBoundsForObject(2));
+    cameraController_.focusOnBounds(objectFocusBounds(2));
     if (cameraStateChangedCallback_) {
         cameraStateChangedCallback_();
     }
@@ -521,18 +452,13 @@ renderer::scene_contract::Vec3f ViewerWindow::Viewport::orbitCenter() const {
 
 void ViewerWindow::Viewport::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
     cameraController_.focusOnPoint(point);
-    if (cameraStateChangedCallback_) {
-        cameraStateChangedCallback_();
-    }
+    notifyCameraStateChanged();
     update();
 }
 
 void ViewerWindow::Viewport::focusOnScene() {
     updateSceneTransforms();
-    cameraController_.focusOnBounds(visibleSceneBounds());
-    if (cameraStateChangedCallback_) {
-        cameraStateChangedCallback_();
-    }
+    applyFocusBounds(visibleFocusBounds());
     update();
 }
 
@@ -749,46 +675,69 @@ void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
 
     cameraController_.zoom(-static_cast<float>(angleDelta.y()) / 120.0F * kWheelZoomStep);
     updateSceneTransforms();
-    const auto bounds = visibleSceneBounds();
+    const auto bounds = visibleFocusBounds();
     if (bounds.valid) {
         cameraController_.updateClipRangeForBounds(bounds);
     } else {
         cameraController_.updateClipRangeForPoint(cameraController_.orbitCenter());
     }
-    if (cameraStateChangedCallback_) {
-        cameraStateChangedCallback_();
-    }
+    notifyCameraStateChanged();
     update();
     event->accept();
 }
 
-void ViewerWindow::Viewport::updateSceneTransforms() {
+renderer::scene_contract::TransformData ViewerWindow::Viewport::currentObjectTransform(int index) const {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return {};
+    }
+
+    const auto& sceneObject = sceneObjects_[index];
     const float elapsedSeconds = static_cast<float>(animationClock_.elapsed()) / 1000.0F;
-    for (auto& sceneObject : sceneObjects_) {
-        repository_.updateTransform(
-            sceneObject.itemId,
-            makeSceneTransform(
-                elapsedSeconds,
-                sceneObject.offsetX,
-                sceneObject.offsetY,
-                sceneObject.offsetZ,
-                sceneObject.scale,
-                sceneObject.rotationSpeed));
+    return makeSceneTransform(
+        elapsedSeconds,
+        sceneObject.offsetX,
+        sceneObject.offsetY,
+        sceneObject.offsetZ,
+        sceneObject.scale,
+        sceneObject.rotationSpeed);
+}
+
+void ViewerWindow::Viewport::notifyCameraStateChanged() {
+    if (cameraStateChangedCallback_) {
+        cameraStateChangedCallback_();
     }
 }
 
-renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleSceneBounds() const {
+void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aabb& bounds) {
+    if (bounds.valid) {
+        cameraController_.focusOnBounds(bounds);
+    } else {
+        cameraController_.updateClipRangeForPoint(cameraController_.orbitCenter());
+    }
+    notifyCameraStateChanged();
+}
+
+void ViewerWindow::Viewport::updateSceneTransforms() {
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        auto& sceneObject = sceneObjects_[index];
+        repository_.updateTransform(
+            sceneObject.itemId,
+            currentObjectTransform(index));
+    }
+}
+
+renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleFocusBounds() const {
     renderer::scene_contract::Aabb bounds;
     for (int index = 0; index < kSceneObjectCount; ++index) {
         if (!sceneObjects_[index].visible) {
             continue;
         }
-        bounds = mergeAabb(bounds, focusBoundsForObject(index));
+        bounds = camera_focus_bounds::mergeFocusBounds(bounds, objectFocusBounds(index));
     }
     return bounds;
 }
 
-renderer::scene_contract::Aabb ViewerWindow::Viewport::focusBoundsForObject(int index) const {
+renderer::scene_contract::Aabb ViewerWindow::Viewport::objectFocusBounds(int index) const {
     if (index < 0 || index >= kSceneObjectCount) {
         return {};
     }
@@ -799,26 +748,7 @@ renderer::scene_contract::Aabb ViewerWindow::Viewport::focusBoundsForObject(int 
         return {};
     }
 
-    const float elapsedSeconds = static_cast<float>(animationClock_.elapsed()) / 1000.0F;
-    const auto transform = makeSceneTransform(
-        elapsedSeconds,
-        sceneObject.offsetX,
-        sceneObject.offsetY,
-        sceneObject.offsetZ,
-        sceneObject.scale,
-        sceneObject.rotationSpeed);
-
-    const auto localCenter = aabbCenter(localBounds);
-    const auto worldCenter = transformPoint(transform.world, localCenter);
-    const auto halfExtent = aabbHalfExtent(localBounds);
-    const float radius =
-        renderer::scene_contract::math::length(halfExtent) * std::max(maxAxisScale(transform.world), 1.0F);
-
-    renderer::scene_contract::Aabb bounds;
-    bounds.min = {worldCenter.x - radius, worldCenter.y - radius, worldCenter.z - radius};
-    bounds.max = {worldCenter.x + radius, worldCenter.y + radius, worldCenter.z + radius};
-    bounds.valid = true;
-    return bounds;
+    return camera_focus_bounds::makeStableFocusBounds(localBounds, currentObjectTransform(index));
 }
 
 void ViewerWindow::Viewport::rebuildFramePacket() {

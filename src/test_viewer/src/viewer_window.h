@@ -81,9 +81,12 @@ private:
         void wheelEvent(QWheelEvent* event) override;
 
     private:
+        [[nodiscard]] renderer::scene_contract::TransformData currentObjectTransform(int index) const;
+        void notifyCameraStateChanged();
+        void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
         void updateSceneTransforms();
-        [[nodiscard]] renderer::scene_contract::Aabb focusBoundsForObject(int index) const;
-        [[nodiscard]] renderer::scene_contract::Aabb visibleSceneBounds() const;
+        [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
+        [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
         void rebuildFramePacket();
 
         struct SceneObject {
