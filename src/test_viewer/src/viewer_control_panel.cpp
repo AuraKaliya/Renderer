@@ -152,23 +152,14 @@ void ViewerControlPanel::setLightingState(float ambientStrength, const renderer:
     lightingWidget_->setLightingState(ambientStrength, lightDirection);
 }
 
-void ViewerControlPanel::setCameraState(
-    int projectionMode,
-    int zoomMode,
-    float distance,
-    float verticalFovDegrees,
-    float orthographicHeight,
-    float nearPlane,
-    float farPlane,
-    const renderer::scene_contract::Vec3f& orbitCenter)
-{
+void ViewerControlPanel::setCameraState(const CameraPanelState& state) {
     cameraWidget_->setCameraState(
-        projectionMode,
-        zoomMode,
-        distance,
-        verticalFovDegrees,
-        orthographicHeight,
-        nearPlane,
-        farPlane,
-        orbitCenter);
+        state.projectionMode,
+        state.zoomMode,
+        state.distance,
+        state.verticalFovDegrees,
+        state.orthographicHeight,
+        state.nearPlane,
+        state.farPlane,
+        state.orbitCenter);
 }

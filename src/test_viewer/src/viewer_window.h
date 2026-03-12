@@ -29,6 +29,10 @@ public:
     ViewerWindow();
 
 private:
+    void bindControlPanelSignals();
+    void syncSceneObjectPanel();
+    void syncLightingPanel();
+    void syncCameraPanel();
     class Viewport final : public QOpenGLWidget, protected QOpenGLExtraFunctions {
     public:
         static constexpr int kSceneObjectCount = 3;
@@ -67,6 +71,7 @@ private:
         [[nodiscard]] float orthographicHeight() const;
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
+        [[nodiscard]] ViewerControlPanel::CameraPanelState cameraPanelState() const;
 
         void setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter);
         [[nodiscard]] renderer::scene_contract::Vec3f orbitCenter() const;

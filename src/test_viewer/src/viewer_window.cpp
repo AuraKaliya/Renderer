@@ -167,6 +167,19 @@ ViewerWindow::ViewerWindow() {
     layout->addWidget(viewport_, 1);
     layout->addWidget(controlPanel_);
 
+    bindControlPanelSignals();
+
+    setCentralWidget(centralWidget);
+    resize(1280, 720);
+    setWindowTitle("Renderer Test Viewer");
+    syncControlPanel();
+}
+
+void ViewerWindow::bindControlPanelSignals() {
+    if (viewport_ == nullptr || controlPanel_ == nullptr) {
+        return;
+    }
+
     connect(controlPanel_, &ViewerControlPanel::objectVisibleChanged, this, [this](int index, bool visible) {
         viewport_->setObjectVisible(index, visible);
     });
@@ -217,11 +230,6 @@ ViewerWindow::ViewerWindow() {
         viewport_->applySphereFocusPreset();
         syncControlPanel();
     });
-
-    setCentralWidget(centralWidget);
-    resize(1280, 720);
-    setWindowTitle("Renderer Test Viewer");
-    syncControlPanel();
 }
 
 ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallback)
@@ -489,6 +497,19 @@ float ViewerWindow::Viewport::nearPlane() const {
 
 float ViewerWindow::Viewport::farPlane() const {
     return cameraController_.farPlane();
+}
+
+ViewerControlPanel::CameraPanelState ViewerWindow::Viewport::cameraPanelState() const {
+    ViewerControlPanel::CameraPanelState state;
+    state.projectionMode = projectionMode() == OrbitCameraController::ProjectionMode::orthographic ? 1 : 0;
+    state.zoomMode = zoomMode() == OrbitCameraController::ZoomMode::lens ? 1 : 0;
+    state.distance = cameraDistance();
+    state.verticalFovDegrees = verticalFovDegrees();
+    state.orthographicHeight = orthographicHeight();
+    state.nearPlane = nearPlane();
+    state.farPlane = farPlane();
+    state.orbitCenter = orbitCenter();
+    return state;
 }
 
 void ViewerWindow::Viewport::setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter) {
@@ -829,6 +850,12 @@ void ViewerWindow::syncControlPanel() {
         return;
     }
 
+    syncSceneObjectPanel();
+    syncLightingPanel();
+    syncCameraPanel();
+}
+
+void ViewerWindow::syncSceneObjectPanel() {
     for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
         controlPanel_->setObjectState(
             index,
@@ -839,17 +866,14 @@ void ViewerWindow::syncControlPanel() {
             index,
             viewport_->objectLocalBounds(index));
     }
+}
 
+void ViewerWindow::syncLightingPanel() {
     controlPanel_->setLightingState(
         viewport_->ambientStrength(),
         viewport_->lightDirection());
-    controlPanel_->setCameraState(
-        viewport_->projectionMode() == OrbitCameraController::ProjectionMode::orthographic ? 1 : 0,
-        viewport_->zoomMode() == OrbitCameraController::ZoomMode::lens ? 1 : 0,
-        viewport_->cameraDistance(),
-        viewport_->verticalFovDegrees(),
-        viewport_->orthographicHeight(),
-        viewport_->nearPlane(),
-        viewport_->farPlane(),
-        viewport_->orbitCenter());
+}
+
+void ViewerWindow::syncCameraPanel() {
+    controlPanel_->setCameraState(viewport_->cameraPanelState());
 }

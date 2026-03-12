@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QSignalBlocker>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 
 namespace {
@@ -24,6 +25,102 @@ QString formatNearFarText(float nearPlane, float farPlane) {
         .arg(farPlane, 0, 'f', 3);
 }
 
+enum class ParameterRole {
+    primary,
+    secondary,
+    inactive
+};
+
+struct CameraUiRuleSet {
+    bool zoomModeEditable = false;
+    bool distanceEditable = false;
+    bool fovEditable = false;
+    bool orthographicHeightEditable = false;
+    ParameterRole distanceRole = ParameterRole::inactive;
+    ParameterRole fovRole = ParameterRole::inactive;
+    ParameterRole orthographicHeightRole = ParameterRole::inactive;
+};
+
+QString formatRoleText(ParameterRole role) {
+    switch (role) {
+    case ParameterRole::primary:
+        return QStringLiteral("Primary");
+    case ParameterRole::secondary:
+        return QStringLiteral("Secondary");
+    case ParameterRole::inactive:
+    default:
+        return QStringLiteral("Inactive");
+    }
+}
+
+void applyRoleLabelStyle(QLabel* label, ParameterRole role) {
+    switch (role) {
+    case ParameterRole::primary:
+        label->setStyleSheet(QStringLiteral("color: #1f5f2c; font-weight: 600;"));
+        break;
+    case ParameterRole::secondary:
+        label->setStyleSheet(QStringLiteral("color: #6a6a6a;"));
+        break;
+    case ParameterRole::inactive:
+    default:
+        label->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
+        break;
+    }
+}
+
+CameraUiRuleSet makeUiRuleSet(int projectionMode, int zoomMode) {
+    const bool perspective = projectionMode == 0;
+    const bool lens = zoomMode == 1;
+
+    CameraUiRuleSet rules;
+    rules.zoomModeEditable = perspective;
+
+    if (perspective && !lens) {
+        rules.distanceEditable = true;
+        rules.fovEditable = true;
+        rules.distanceRole = ParameterRole::primary;
+        rules.fovRole = ParameterRole::secondary;
+        return rules;
+    }
+
+    if (perspective && lens) {
+        rules.distanceEditable = true;
+        rules.fovEditable = true;
+        rules.distanceRole = ParameterRole::secondary;
+        rules.fovRole = ParameterRole::primary;
+        return rules;
+    }
+
+    rules.orthographicHeightEditable = true;
+    rules.distanceRole = ParameterRole::secondary;
+    rules.orthographicHeightRole = ParameterRole::primary;
+    return rules;
+}
+
+QWidget* makeLabeledControlRow(
+    const QString& labelText,
+    QWidget* editor,
+    QLabel*& roleLabel,
+    QWidget* parent)
+{
+    auto* container = new QWidget(parent);
+    auto* layout = new QHBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+
+    auto* nameLabel = new QLabel(labelText, container);
+    nameLabel->setMinimumWidth(92);
+
+    roleLabel = new QLabel(container);
+    roleLabel->setMinimumWidth(60);
+    roleLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    layout->addWidget(nameLabel);
+    layout->addWidget(editor, 1);
+    layout->addWidget(roleLabel);
+    return container;
+}
+
 }  // namespace
 
 CameraControlWidget::CameraControlWidget(QWidget* parent)
@@ -33,7 +130,16 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
     rootLayout->setContentsMargins(0, 0, 0, 0);
 
     auto* group = new QGroupBox("Camera", this);
-    auto* formLayout = new QFormLayout(group);
+    auto* groupLayout = new QVBoxLayout(group);
+
+    modeGroup_ = new QGroupBox("Mode", group);
+    auto* modeLayout = new QFormLayout(modeGroup_);
+
+    parameterGroup_ = new QGroupBox("Parameters", group);
+    auto* parameterLayout = new QVBoxLayout(parameterGroup_);
+
+    focusGroup_ = new QGroupBox("Focus / State", group);
+    auto* focusLayout = new QFormLayout(focusGroup_);
 
     projectionModeComboBox_ = new QComboBox(group);
     projectionModeComboBox_->addItem("Perspective", 0);
@@ -102,18 +208,23 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
             static_cast<float>(focusPointZSpinBox_->value()));
     });
 
-    formLayout->addRow("Projection", projectionModeComboBox_);
-    formLayout->addRow("Zoom Mode", zoomModeComboBox_);
-    formLayout->addRow("Distance", distanceSpinBox_);
-    formLayout->addRow("Vertical FOV", fovSpinBox_);
-    formLayout->addRow("Ortho Height", orthographicHeightSpinBox_);
-    formLayout->addRow("Near / Far", nearFarLabel_);
-    formLayout->addRow("Orbit Center", orbitCenterLabel_);
-    formLayout->addRow("Point X", focusPointXSpinBox_);
-    formLayout->addRow("Point Y", focusPointYSpinBox_);
-    formLayout->addRow("Point Z", focusPointZSpinBox_);
-    formLayout->addRow("", focusPointButton_);
+    modeLayout->addRow("Projection", projectionModeComboBox_);
+    modeLayout->addRow("Zoom Mode", zoomModeComboBox_);
 
+    parameterLayout->addWidget(makeLabeledControlRow("Distance", distanceSpinBox_, distanceRoleLabel_, parameterGroup_));
+    parameterLayout->addWidget(makeLabeledControlRow("Vertical FOV", fovSpinBox_, fovRoleLabel_, parameterGroup_));
+    parameterLayout->addWidget(makeLabeledControlRow("Ortho Height", orthographicHeightSpinBox_, orthographicHeightRoleLabel_, parameterGroup_));
+
+    focusLayout->addRow("Near / Far", nearFarLabel_);
+    focusLayout->addRow("Orbit Center", orbitCenterLabel_);
+    focusLayout->addRow("Point X", focusPointXSpinBox_);
+    focusLayout->addRow("Point Y", focusPointYSpinBox_);
+    focusLayout->addRow("Point Z", focusPointZSpinBox_);
+    focusLayout->addRow("", focusPointButton_);
+
+    groupLayout->addWidget(modeGroup_);
+    groupLayout->addWidget(parameterGroup_);
+    groupLayout->addWidget(focusGroup_);
     rootLayout->addWidget(group);
 }
 
@@ -153,9 +264,17 @@ void CameraControlWidget::setCameraState(
     focusPointYSpinBox_->setValue(orbitCenter.y);
     focusPointZSpinBox_->setValue(orbitCenter.z);
 
-    const bool perspective = projectionMode == 0;
-    zoomModeComboBox_->setEnabled(perspective);
-    fovSpinBox_->setEnabled(perspective);
-    distanceSpinBox_->setEnabled(perspective);
-    orthographicHeightSpinBox_->setEnabled(!perspective);
+    const CameraUiRuleSet rules = makeUiRuleSet(projectionMode, zoomMode);
+    zoomModeComboBox_->setEnabled(rules.zoomModeEditable);
+    distanceSpinBox_->setEnabled(rules.distanceEditable);
+    fovSpinBox_->setEnabled(rules.fovEditable);
+    orthographicHeightSpinBox_->setEnabled(rules.orthographicHeightEditable);
+
+    distanceRoleLabel_->setText(formatRoleText(rules.distanceRole));
+    fovRoleLabel_->setText(formatRoleText(rules.fovRole));
+    orthographicHeightRoleLabel_->setText(formatRoleText(rules.orthographicHeightRole));
+
+    applyRoleLabelStyle(distanceRoleLabel_, rules.distanceRole);
+    applyRoleLabelStyle(fovRoleLabel_, rules.fovRole);
+    applyRoleLabelStyle(orthographicHeightRoleLabel_, rules.orthographicHeightRole);
 }

@@ -17,20 +17,23 @@ class ViewerControlPanel final : public QWidget {
 public:
     static constexpr int kSceneObjectCount = 3;
 
+    struct CameraPanelState {
+        int projectionMode = 0;
+        int zoomMode = 0;
+        float distance = 0.0F;
+        float verticalFovDegrees = 0.0F;
+        float orthographicHeight = 0.0F;
+        float nearPlane = 0.0F;
+        float farPlane = 0.0F;
+        renderer::scene_contract::Vec3f orbitCenter {};
+    };
+
     explicit ViewerControlPanel(QWidget* parent = nullptr);
 
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
     void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
-    void setCameraState(
-        int projectionMode,
-        int zoomMode,
-        float distance,
-        float verticalFovDegrees,
-        float orthographicHeight,
-        float nearPlane,
-        float farPlane,
-        const renderer::scene_contract::Vec3f& orbitCenter);
+    void setCameraState(const CameraPanelState& state);
 
 signals:
     void objectVisibleChanged(int index, bool visible);
