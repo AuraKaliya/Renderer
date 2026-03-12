@@ -188,6 +188,12 @@ ViewerWindow::ViewerWindow() {
                 ? OrbitCameraController::ProjectionMode::orthographic
                 : OrbitCameraController::ProjectionMode::perspective);
     });
+    connect(controlPanel_, &ViewerControlPanel::zoomModeChanged, this, [this](int mode) {
+        viewport_->setZoomMode(
+            mode == 1
+                ? OrbitCameraController::ZoomMode::lens
+                : OrbitCameraController::ZoomMode::dolly);
+    });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
     });
@@ -445,6 +451,12 @@ void ViewerWindow::Viewport::setProjectionMode(OrbitCameraController::Projection
 
 OrbitCameraController::ProjectionMode ViewerWindow::Viewport::projectionMode() const {
     return cameraController_.projectionMode();
+}
+
+void ViewerWindow::Viewport::setZoomMode(OrbitCameraController::ZoomMode mode) {
+    cameraController_.setZoomMode(mode);
+    notifyCameraStateChanged();
+    update();
 }
 
 OrbitCameraController::ZoomMode ViewerWindow::Viewport::zoomMode() const {

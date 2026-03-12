@@ -59,6 +59,7 @@ private:
 
         void setProjectionMode(OrbitCameraController::ProjectionMode mode);
         [[nodiscard]] OrbitCameraController::ProjectionMode projectionMode() const;
+        void setZoomMode(OrbitCameraController::ZoomMode mode);
         [[nodiscard]] OrbitCameraController::ZoomMode zoomMode() const;
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;

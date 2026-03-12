@@ -26,6 +26,7 @@ public:
 
 signals:
     void projectionModeChanged(int mode);
+    void zoomModeChanged(int mode);
     void cameraDistanceChanged(float distance);
     void verticalFovDegreesChanged(float degrees);
     void orthographicHeightChanged(float height);
@@ -33,13 +34,13 @@ signals:
 
 private:
     QComboBox* projectionModeComboBox_ = nullptr;
+    QComboBox* zoomModeComboBox_ = nullptr;
     QDoubleSpinBox* distanceSpinBox_ = nullptr;
     QDoubleSpinBox* fovSpinBox_ = nullptr;
     QDoubleSpinBox* orthographicHeightSpinBox_ = nullptr;
     QDoubleSpinBox* focusPointXSpinBox_ = nullptr;
     QDoubleSpinBox* focusPointYSpinBox_ = nullptr;
     QDoubleSpinBox* focusPointZSpinBox_ = nullptr;
-    QLabel* zoomModeLabel_ = nullptr;
     QLabel* orbitCenterLabel_ = nullptr;
     QLabel* nearFarLabel_ = nullptr;
     QPushButton* focusPointButton_ = nullptr;

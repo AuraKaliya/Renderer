@@ -10,6 +10,8 @@ namespace {
 
 constexpr float kMinPitchRadians = -1.45F;
 constexpr float kMaxPitchRadians = 1.45F;
+constexpr float kPerspectiveLensZoomScale = 0.12F;
+constexpr float kMinPerspectiveLensZoomStep = 1.0F;
 constexpr float kOrthographicZoomScale = 0.15F;
 constexpr float kMinOrthographicZoomStep = 0.1F;
 
@@ -173,6 +175,12 @@ void OrbitCameraController::rotate(float deltaYawRadians, float deltaPitchRadian
 }
 
 void OrbitCameraController::zoom(float deltaDistance) {
+    if (projectionMode_ == ProjectionMode::perspective && zoomMode_ == ZoomMode::lens) {
+        const float zoomStep = std::max(kMinPerspectiveLensZoomStep, verticalFovDegrees_ * kPerspectiveLensZoomScale);
+        setVerticalFovDegrees(verticalFovDegrees_ + deltaDistance * zoomStep);
+        return;
+    }
+
     if (projectionMode_ == ProjectionMode::orthographic && zoomMode_ == ZoomMode::lens) {
         const float zoomStep = std::max(kMinOrthographicZoomStep, orthographicHeight_ * kOrthographicZoomScale);
         setOrthographicHeight(orthographicHeight_ + deltaDistance * zoomStep);

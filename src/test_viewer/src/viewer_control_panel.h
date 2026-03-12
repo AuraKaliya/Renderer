@@ -39,6 +39,7 @@ signals:
     void ambientStrengthChanged(float strength);
     void lightDirectionChanged(float x, float y, float z);
     void projectionModeChanged(int mode);
+    void zoomModeChanged(int mode);
     void cameraDistanceChanged(float distance);
     void verticalFovDegreesChanged(float degrees);
     void orthographicHeightChanged(float height);

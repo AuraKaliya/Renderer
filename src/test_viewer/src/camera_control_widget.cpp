@@ -24,10 +24,6 @@ QString formatNearFarText(float nearPlane, float farPlane) {
         .arg(farPlane, 0, 'f', 3);
 }
 
-QString formatZoomModeText(int zoomMode) {
-    return zoomMode == 1 ? QStringLiteral("Lens") : QStringLiteral("Dolly");
-}
-
 }  // namespace
 
 CameraControlWidget::CameraControlWidget(QWidget* parent)
@@ -44,6 +40,13 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
     projectionModeComboBox_->addItem("Orthographic", 1);
     connect(projectionModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
         emit projectionModeChanged(projectionModeComboBox_->itemData(index).toInt());
+    });
+
+    zoomModeComboBox_ = new QComboBox(group);
+    zoomModeComboBox_->addItem("Dolly", 0);
+    zoomModeComboBox_->addItem("Lens", 1);
+    connect(zoomModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        emit zoomModeChanged(zoomModeComboBox_->itemData(index).toInt());
     });
 
     distanceSpinBox_ = new QDoubleSpinBox(group);
@@ -88,9 +91,6 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
     orbitCenterLabel_ = new QLabel(group);
     orbitCenterLabel_->setTextFormat(Qt::PlainText);
 
-    zoomModeLabel_ = new QLabel(group);
-    zoomModeLabel_->setTextFormat(Qt::PlainText);
-
     nearFarLabel_ = new QLabel(group);
     nearFarLabel_->setTextFormat(Qt::PlainText);
 
@@ -103,10 +103,10 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
     });
 
     formLayout->addRow("Projection", projectionModeComboBox_);
+    formLayout->addRow("Zoom Mode", zoomModeComboBox_);
     formLayout->addRow("Distance", distanceSpinBox_);
     formLayout->addRow("Vertical FOV", fovSpinBox_);
     formLayout->addRow("Ortho Height", orthographicHeightSpinBox_);
-    formLayout->addRow("Zoom Mode", zoomModeLabel_);
     formLayout->addRow("Near / Far", nearFarLabel_);
     formLayout->addRow("Orbit Center", orbitCenterLabel_);
     formLayout->addRow("Point X", focusPointXSpinBox_);
@@ -128,6 +128,7 @@ void CameraControlWidget::setCameraState(
     const renderer::scene_contract::Vec3f& orbitCenter)
 {
     const QSignalBlocker projectionBlocker(projectionModeComboBox_);
+    const QSignalBlocker zoomModeBlocker(zoomModeComboBox_);
     const QSignalBlocker distanceBlocker(distanceSpinBox_);
     const QSignalBlocker fovBlocker(fovSpinBox_);
     const QSignalBlocker orthographicHeightBlocker(orthographicHeightSpinBox_);
@@ -139,10 +140,13 @@ void CameraControlWidget::setCameraState(
     if (comboIndex >= 0) {
         projectionModeComboBox_->setCurrentIndex(comboIndex);
     }
+    const int zoomModeIndex = zoomModeComboBox_->findData(zoomMode);
+    if (zoomModeIndex >= 0) {
+        zoomModeComboBox_->setCurrentIndex(zoomModeIndex);
+    }
     distanceSpinBox_->setValue(distance);
     fovSpinBox_->setValue(verticalFovDegrees);
     orthographicHeightSpinBox_->setValue(orthographicHeight);
-    zoomModeLabel_->setText(formatZoomModeText(zoomMode));
     nearFarLabel_->setText(formatNearFarText(nearPlane, farPlane));
     orbitCenterLabel_->setText(formatOrbitCenterText(orbitCenter));
     focusPointXSpinBox_->setValue(orbitCenter.x);
@@ -150,6 +154,7 @@ void CameraControlWidget::setCameraState(
     focusPointZSpinBox_->setValue(orbitCenter.z);
 
     const bool perspective = projectionMode == 0;
+    zoomModeComboBox_->setEnabled(perspective);
     fovSpinBox_->setEnabled(perspective);
     distanceSpinBox_->setEnabled(perspective);
     orthographicHeightSpinBox_->setEnabled(!perspective);

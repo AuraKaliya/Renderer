@@ -67,6 +67,9 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(cameraWidget_, &CameraControlWidget::projectionModeChanged, this, [this](int mode) {
         emit projectionModeChanged(mode);
     });
+    connect(cameraWidget_, &CameraControlWidget::zoomModeChanged, this, [this](int mode) {
+        emit zoomModeChanged(mode);
+    });
     connect(cameraWidget_, &CameraControlWidget::cameraDistanceChanged, this, [this](float distance) {
         emit cameraDistanceChanged(distance);
     });
