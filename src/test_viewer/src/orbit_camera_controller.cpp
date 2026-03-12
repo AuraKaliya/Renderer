@@ -266,14 +266,16 @@ renderer::scene_contract::CameraData OrbitCameraController::buildCameraData() co
     camera.setTarget(orbitCenter_);
     camera.setUp({0.0F, 1.0F, 0.0F});
     camera.setPosition(position());
+    camera.setProjectionMode(
+        projectionMode_ == ProjectionMode::orthographic
+            ? Camera::ProjectionMode::orthographic
+            : Camera::ProjectionMode::perspective);
     camera.setNearPlane(nearPlane_);
     camera.setFarPlane(farPlane_);
     if (projectionMode_ == ProjectionMode::perspective) {
         camera.setVerticalFovDegrees(verticalFovDegrees_);
     } else {
-        // Orthographic rendering is not enabled yet. Keep the current output stable
-        // by using the perspective path until the projection branch is implemented.
-        camera.setVerticalFovDegrees(verticalFovDegrees_);
+        camera.setOrthographicHeight(orthographicHeight_);
     }
     return camera.buildCameraData();
 }

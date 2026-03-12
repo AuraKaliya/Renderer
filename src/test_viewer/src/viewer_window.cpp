@@ -182,11 +182,20 @@ ViewerWindow::ViewerWindow() {
     connect(controlPanel_, &ViewerControlPanel::lightDirectionChanged, this, [this](float x, float y, float z) {
         viewport_->setLightDirection({x, y, z});
     });
+    connect(controlPanel_, &ViewerControlPanel::projectionModeChanged, this, [this](int mode) {
+        viewport_->setProjectionMode(
+            mode == 1
+                ? OrbitCameraController::ProjectionMode::orthographic
+                : OrbitCameraController::ProjectionMode::perspective);
+    });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
     });
     connect(controlPanel_, &ViewerControlPanel::verticalFovDegreesChanged, this, [this](float degrees) {
         viewport_->setVerticalFovDegrees(degrees);
+    });
+    connect(controlPanel_, &ViewerControlPanel::orthographicHeightChanged, this, [this](float height) {
+        viewport_->setOrthographicHeight(height);
     });
     connect(controlPanel_, &ViewerControlPanel::focusPointRequested, this, [this](float x, float y, float z) {
         viewport_->focusOnPoint({x, y, z});
@@ -248,6 +257,7 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     cameraController_.setOrbitCenter({0.0F, kDefaultCameraTargetY, 0.0F});
     cameraController_.setDistance(kDefaultCameraDistance);
     cameraController_.setProjection(kDefaultVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
 
@@ -265,6 +275,7 @@ void ViewerWindow::Viewport::resetDefaults() {
     cameraController_.setOrbitCenter({0.0F, kDefaultCameraTargetY, 0.0F});
     cameraController_.setDistance(kDefaultCameraDistance);
     cameraController_.setProjection(kDefaultVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
 
@@ -292,6 +303,7 @@ void ViewerWindow::Viewport::resetDefaults() {
 void ViewerWindow::Viewport::applySphereFocusPreset() {
     light_ = kSphereFocusLight;
     cameraController_.setProjection(kSphereFocusVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
+    cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
 
@@ -417,6 +429,7 @@ renderer::scene_contract::Vec3f ViewerWindow::Viewport::lightDirection() const {
 
 void ViewerWindow::Viewport::setCameraDistance(float distance) {
     cameraController_.setDistance(distance);
+    notifyCameraStateChanged();
     update();
 }
 
@@ -424,13 +437,34 @@ float ViewerWindow::Viewport::cameraDistance() const {
     return cameraController_.distance();
 }
 
+void ViewerWindow::Viewport::setProjectionMode(OrbitCameraController::ProjectionMode mode) {
+    cameraController_.setProjectionMode(mode);
+    notifyCameraStateChanged();
+    update();
+}
+
+OrbitCameraController::ProjectionMode ViewerWindow::Viewport::projectionMode() const {
+    return cameraController_.projectionMode();
+}
+
 void ViewerWindow::Viewport::setVerticalFovDegrees(float degrees) {
     cameraController_.setVerticalFovDegrees(degrees);
+    notifyCameraStateChanged();
     update();
 }
 
 float ViewerWindow::Viewport::verticalFovDegrees() const {
     return cameraController_.verticalFovDegrees();
+}
+
+void ViewerWindow::Viewport::setOrthographicHeight(float height) {
+    cameraController_.setOrthographicHeight(height);
+    notifyCameraStateChanged();
+    update();
+}
+
+float ViewerWindow::Viewport::orthographicHeight() const {
+    return cameraController_.orthographicHeight();
 }
 
 float ViewerWindow::Viewport::nearPlane() const {
@@ -794,8 +828,10 @@ void ViewerWindow::syncControlPanel() {
         viewport_->ambientStrength(),
         viewport_->lightDirection());
     controlPanel_->setCameraState(
+        viewport_->projectionMode() == OrbitCameraController::ProjectionMode::orthographic ? 1 : 0,
         viewport_->cameraDistance(),
         viewport_->verticalFovDegrees(),
+        viewport_->orthographicHeight(),
         viewport_->nearPlane(),
         viewport_->farPlane(),
         viewport_->orbitCenter());

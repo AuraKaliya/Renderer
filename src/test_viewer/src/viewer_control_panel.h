@@ -23,8 +23,10 @@ public:
     void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(
+        int projectionMode,
         float distance,
         float verticalFovDegrees,
+        float orthographicHeight,
         float nearPlane,
         float farPlane,
         const renderer::scene_contract::Vec3f& orbitCenter);
@@ -35,8 +37,10 @@ signals:
     void objectColorChanged(int index, float red, float green, float blue);
     void ambientStrengthChanged(float strength);
     void lightDirectionChanged(float x, float y, float z);
+    void projectionModeChanged(int mode);
     void cameraDistanceChanged(float distance);
     void verticalFovDegreesChanged(float degrees);
+    void orthographicHeightChanged(float height);
     void focusPointRequested(float x, float y, float z);
     void focusAllRequested();
     void resetDefaultsRequested();

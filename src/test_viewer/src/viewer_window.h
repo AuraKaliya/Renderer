@@ -57,8 +57,12 @@ private:
         void setCameraDistance(float distance);
         [[nodiscard]] float cameraDistance() const;
 
+        void setProjectionMode(OrbitCameraController::ProjectionMode mode);
+        [[nodiscard]] OrbitCameraController::ProjectionMode projectionMode() const;
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;
+        void setOrthographicHeight(float height);
+        [[nodiscard]] float orthographicHeight() const;
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
 

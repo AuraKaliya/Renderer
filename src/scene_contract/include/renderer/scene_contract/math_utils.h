@@ -118,6 +118,29 @@ inline Mat4f makePerspective(float verticalFovRadians, float aspectRatio, float 
     return matrix;
 }
 
+inline Mat4f makeOrthographic(
+    float left,
+    float right,
+    float bottom,
+    float top,
+    float nearPlane,
+    float farPlane)
+{
+    Mat4f matrix = {};
+    const float inverseWidth = 1.0F / (right - left);
+    const float inverseHeight = 1.0F / (top - bottom);
+    const float inverseDepth = 1.0F / (farPlane - nearPlane);
+
+    matrix.elements[0] = 2.0F * inverseWidth;
+    matrix.elements[5] = 2.0F * inverseHeight;
+    matrix.elements[10] = -2.0F * inverseDepth;
+    matrix.elements[12] = -(right + left) * inverseWidth;
+    matrix.elements[13] = -(top + bottom) * inverseHeight;
+    matrix.elements[14] = -(farPlane + nearPlane) * inverseDepth;
+    matrix.elements[15] = 1.0F;
+    return matrix;
+}
+
 inline Mat4f makeLookAt(const Vec3f& eye, const Vec3f& center, const Vec3f& up) {
     const Vec3f forward = normalize(subtract(center, eye));
     const Vec3f side = normalize(cross(forward, up));

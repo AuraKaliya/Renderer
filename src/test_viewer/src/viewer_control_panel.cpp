@@ -64,11 +64,17 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     });
 
     cameraWidget_ = new CameraControlWidget(this);
+    connect(cameraWidget_, &CameraControlWidget::projectionModeChanged, this, [this](int mode) {
+        emit projectionModeChanged(mode);
+    });
     connect(cameraWidget_, &CameraControlWidget::cameraDistanceChanged, this, [this](float distance) {
         emit cameraDistanceChanged(distance);
     });
     connect(cameraWidget_, &CameraControlWidget::verticalFovDegreesChanged, this, [this](float degrees) {
         emit verticalFovDegreesChanged(degrees);
+    });
+    connect(cameraWidget_, &CameraControlWidget::orthographicHeightChanged, this, [this](float height) {
+        emit orthographicHeightChanged(height);
     });
     connect(cameraWidget_, &CameraControlWidget::focusPointRequested, this, [this](float x, float y, float z) {
         emit focusPointRequested(x, y, z);
@@ -144,11 +150,20 @@ void ViewerControlPanel::setLightingState(float ambientStrength, const renderer:
 }
 
 void ViewerControlPanel::setCameraState(
+    int projectionMode,
     float distance,
     float verticalFovDegrees,
+    float orthographicHeight,
     float nearPlane,
     float farPlane,
     const renderer::scene_contract::Vec3f& orbitCenter)
 {
-    cameraWidget_->setCameraState(distance, verticalFovDegrees, nearPlane, farPlane, orbitCenter);
+    cameraWidget_->setCameraState(
+        projectionMode,
+        distance,
+        verticalFovDegrees,
+        orthographicHeight,
+        nearPlane,
+        farPlane,
+        orbitCenter);
 }

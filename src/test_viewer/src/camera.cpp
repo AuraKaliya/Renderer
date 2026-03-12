@@ -22,6 +22,14 @@ void Camera::setUp(const renderer::scene_contract::Vec3f& up) {
     up_ = up;
 }
 
+void Camera::setProjectionMode(ProjectionMode mode) {
+    projectionMode_ = mode;
+}
+
+Camera::ProjectionMode Camera::projectionMode() const {
+    return projectionMode_;
+}
+
 void Camera::setVerticalFovDegrees(float degrees) {
     if (degrees < 20.0F) {
         degrees = 20.0F;
@@ -29,6 +37,13 @@ void Camera::setVerticalFovDegrees(float degrees) {
         degrees = 90.0F;
     }
     verticalFovDegrees_ = degrees;
+}
+
+void Camera::setOrthographicHeight(float height) {
+    if (height <= 0.0F) {
+        height = 0.01F;
+    }
+    orthographicHeight_ = height;
 }
 
 void Camera::setNearPlane(float value) {
@@ -52,10 +67,24 @@ renderer::scene_contract::CameraData Camera::buildCameraData() const {
     renderer::scene_contract::CameraData camera;
     camera.position = position_;
     camera.view = renderer::scene_contract::math::makeLookAt(position_, target_, up_);
-    camera.projection = renderer::scene_contract::math::makePerspective(
-        verticalFovDegrees_ * renderer::scene_contract::math::kPi / 180.0F,
-        aspectRatio_,
-        nearPlane_,
-        farPlane_);
+
+    if (projectionMode_ == ProjectionMode::perspective) {
+        camera.projection = renderer::scene_contract::math::makePerspective(
+            verticalFovDegrees_ * renderer::scene_contract::math::kPi / 180.0F,
+            aspectRatio_,
+            nearPlane_,
+            farPlane_);
+    } else {
+        const float halfHeight = orthographicHeight_ * 0.5F;
+        const float halfWidth = halfHeight * aspectRatio_;
+        camera.projection = renderer::scene_contract::math::makeOrthographic(
+            -halfWidth,
+            halfWidth,
+            -halfHeight,
+            halfHeight,
+            nearPlane_,
+            farPlane_);
+    }
+
     return camera;
 }
