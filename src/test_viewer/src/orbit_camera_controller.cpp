@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "camera.h"
+#include "camera_focus_utils.h"
 
 namespace {
 
@@ -62,14 +63,6 @@ float clampPitchRadians(float radians) {
         return kMaxPitchRadians;
     }
     return radians;
-}
-
-renderer::scene_contract::Vec3f aabbCenter(const renderer::scene_contract::Aabb& bounds) {
-    return {
-        (bounds.min.x + bounds.max.x) * 0.5F,
-        (bounds.min.y + bounds.max.y) * 0.5F,
-        (bounds.min.z + bounds.max.z) * 0.5F
-    };
 }
 
 }  // namespace
@@ -157,7 +150,11 @@ void OrbitCameraController::pan(float deltaRight, float deltaUp) {
 }
 
 void OrbitCameraController::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
-    setOrbitCenter(point);
+    const auto focusSettings = camera_focus::makeFocusSettingsForPoint(point, distance_);
+    setOrbitCenter(focusSettings.orbitCenter);
+    setDistance(focusSettings.distance);
+    setNearPlane(focusSettings.nearPlane);
+    setFarPlane(focusSettings.farPlane);
 }
 
 void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& bounds) {
@@ -165,7 +162,15 @@ void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& 
         return;
     }
 
-    focusOnPoint(aabbCenter(bounds));
+    const auto focusSettings = camera_focus::makeFocusSettingsForBounds(
+        bounds,
+        viewportWidth_,
+        viewportHeight_,
+        verticalFovDegrees_);
+    setOrbitCenter(focusSettings.orbitCenter);
+    setDistance(focusSettings.distance);
+    setNearPlane(focusSettings.nearPlane);
+    setFarPlane(focusSettings.farPlane);
 }
 
 void OrbitCameraController::setNearPlane(float value) {

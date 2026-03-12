@@ -59,6 +59,8 @@ private:
 
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;
+        [[nodiscard]] float nearPlane() const;
+        [[nodiscard]] float farPlane() const;
 
         void setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter);
         [[nodiscard]] renderer::scene_contract::Vec3f orbitCenter() const;
@@ -79,6 +81,8 @@ private:
         void wheelEvent(QWheelEvent* event) override;
 
     private:
+        void updateSceneTransforms();
+        [[nodiscard]] renderer::scene_contract::Aabb visibleSceneBounds() const;
         void rebuildFramePacket();
 
         struct SceneObject {

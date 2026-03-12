@@ -49,7 +49,6 @@ const renderer::scene_contract::DirectionalLightData kSphereFocusLight = {
 
 constexpr float kDefaultCameraDistance = 6.8F;
 constexpr float kDefaultVerticalFovDegrees = 50.0F;
-constexpr float kSphereFocusCameraDistance = 5.2F;
 constexpr float kSphereFocusVerticalFovDegrees = 38.0F;
 constexpr float kDefaultNearPlane = 0.1F;
 constexpr float kDefaultFarPlane = 100.0F;
@@ -150,6 +149,32 @@ QSurfaceFormat makeFormat() {
     return format;
 }
 
+renderer::scene_contract::Aabb mergeAabb(
+    const renderer::scene_contract::Aabb& left,
+    const renderer::scene_contract::Aabb& right)
+{
+    if (!left.valid) {
+        return right;
+    }
+    if (!right.valid) {
+        return left;
+    }
+
+    renderer::scene_contract::Aabb merged;
+    merged.min = {
+        std::min(left.min.x, right.min.x),
+        std::min(left.min.y, right.min.y),
+        std::min(left.min.z, right.min.z)
+    };
+    merged.max = {
+        std::max(left.max.x, right.max.x),
+        std::max(left.max.y, right.max.y),
+        std::max(left.max.z, right.max.z)
+    };
+    merged.valid = true;
+    return merged;
+}
+
 }  // namespace
 
 ViewerWindow::ViewerWindow() {
@@ -187,6 +212,12 @@ ViewerWindow::ViewerWindow() {
     });
     connect(controlPanel_, &ViewerControlPanel::verticalFovDegreesChanged, this, [this](float degrees) {
         viewport_->setVerticalFovDegrees(degrees);
+    });
+    connect(controlPanel_, &ViewerControlPanel::focusPointRequested, this, [this](float x, float y, float z) {
+        viewport_->focusOnPoint({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::focusAllRequested, this, [this]() {
+        viewport_->focusOnScene();
     });
     connect(controlPanel_, &ViewerControlPanel::resetDefaultsRequested, this, [this]() {
         viewport_->resetDefaults();
@@ -285,7 +316,6 @@ void ViewerWindow::Viewport::resetDefaults() {
 
 void ViewerWindow::Viewport::applySphereFocusPreset() {
     light_ = kSphereFocusLight;
-    cameraController_.setDistance(kSphereFocusCameraDistance);
     cameraController_.setProjection(kSphereFocusVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
@@ -326,6 +356,12 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     if (renderer_.isInitialized() &&
         sceneObjects_[2].materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
         renderer_.updateMaterial(sceneObjects_[2].materialHandle, sceneObjects_[2].materialData);
+    }
+
+    updateSceneTransforms();
+    cameraController_.focusOnBounds(repository_.rangeData(sceneObjects_[2].itemId).worldBounds);
+    if (cameraStateChangedCallback_) {
+        cameraStateChangedCallback_();
     }
 
     update();
@@ -422,6 +458,14 @@ float ViewerWindow::Viewport::verticalFovDegrees() const {
     return cameraController_.verticalFovDegrees();
 }
 
+float ViewerWindow::Viewport::nearPlane() const {
+    return cameraController_.nearPlane();
+}
+
+float ViewerWindow::Viewport::farPlane() const {
+    return cameraController_.farPlane();
+}
+
 void ViewerWindow::Viewport::setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter) {
     cameraController_.setOrbitCenter(orbitCenter);
     update();
@@ -433,11 +477,18 @@ renderer::scene_contract::Vec3f ViewerWindow::Viewport::orbitCenter() const {
 
 void ViewerWindow::Viewport::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
     cameraController_.focusOnPoint(point);
+    if (cameraStateChangedCallback_) {
+        cameraStateChangedCallback_();
+    }
     update();
 }
 
 void ViewerWindow::Viewport::focusOnScene() {
-    cameraController_.focusOnBounds(repository_.sceneRangeData().worldBounds);
+    updateSceneTransforms();
+    cameraController_.focusOnBounds(visibleSceneBounds());
+    if (cameraStateChangedCallback_) {
+        cameraStateChangedCallback_();
+    }
     update();
 }
 
@@ -660,7 +711,7 @@ void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
     event->accept();
 }
 
-void ViewerWindow::Viewport::rebuildFramePacket() {
+void ViewerWindow::Viewport::updateSceneTransforms() {
     const float elapsedSeconds = static_cast<float>(animationClock_.elapsed()) / 1000.0F;
     for (auto& sceneObject : sceneObjects_) {
         repository_.updateTransform(
@@ -673,6 +724,21 @@ void ViewerWindow::Viewport::rebuildFramePacket() {
                 sceneObject.scale,
                 sceneObject.rotationSpeed));
     }
+}
+
+renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleSceneBounds() const {
+    renderer::scene_contract::Aabb bounds;
+    for (const auto& sceneObject : sceneObjects_) {
+        if (!sceneObject.visible) {
+            continue;
+        }
+        bounds = mergeAabb(bounds, repository_.rangeData(sceneObject.itemId).worldBounds);
+    }
+    return bounds;
+}
+
+void ViewerWindow::Viewport::rebuildFramePacket() {
+    updateSceneTransforms();
 
     auto scene = repository_.snapshot(cameraController_.buildCameraData());
     scene.light = light_;
@@ -716,5 +782,7 @@ void ViewerWindow::syncControlPanel() {
     controlPanel_->setCameraState(
         viewport_->cameraDistance(),
         viewport_->verticalFovDegrees(),
+        viewport_->nearPlane(),
+        viewport_->farPlane(),
         viewport_->orbitCenter());
 }

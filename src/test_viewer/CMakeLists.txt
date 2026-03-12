@@ -9,6 +9,8 @@ add_executable(test_viewer
     src/main.cpp
     src/camera.h
     src/camera.cpp
+    src/camera_focus_utils.h
+    src/camera_focus_utils.cpp
     src/orbit_camera_controller.h
     src/orbit_camera_controller.cpp
     src/lighting_control_widget.h

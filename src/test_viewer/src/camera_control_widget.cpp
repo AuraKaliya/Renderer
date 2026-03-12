@@ -4,6 +4,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -14,6 +15,12 @@ QString formatOrbitCenterText(const renderer::scene_contract::Vec3f& orbitCenter
         .arg(orbitCenter.x, 0, 'f', 2)
         .arg(orbitCenter.y, 0, 'f', 2)
         .arg(orbitCenter.z, 0, 'f', 2);
+}
+
+QString formatNearFarText(float nearPlane, float farPlane) {
+    return QStringLiteral("near=%1 far=%2")
+        .arg(nearPlane, 0, 'f', 3)
+        .arg(farPlane, 0, 'f', 3);
 }
 
 }  // namespace
@@ -43,12 +50,43 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
         emit verticalFovDegreesChanged(static_cast<float>(value));
     });
 
+    focusPointXSpinBox_ = new QDoubleSpinBox(group);
+    focusPointXSpinBox_->setRange(-1000.0, 1000.0);
+    focusPointXSpinBox_->setSingleStep(0.1);
+    focusPointXSpinBox_->setDecimals(2);
+
+    focusPointYSpinBox_ = new QDoubleSpinBox(group);
+    focusPointYSpinBox_->setRange(-1000.0, 1000.0);
+    focusPointYSpinBox_->setSingleStep(0.1);
+    focusPointYSpinBox_->setDecimals(2);
+
+    focusPointZSpinBox_ = new QDoubleSpinBox(group);
+    focusPointZSpinBox_->setRange(-1000.0, 1000.0);
+    focusPointZSpinBox_->setSingleStep(0.1);
+    focusPointZSpinBox_->setDecimals(2);
+
     orbitCenterLabel_ = new QLabel(group);
     orbitCenterLabel_->setTextFormat(Qt::PlainText);
 
+    nearFarLabel_ = new QLabel(group);
+    nearFarLabel_->setTextFormat(Qt::PlainText);
+
+    focusPointButton_ = new QPushButton("Focus Point", group);
+    connect(focusPointButton_, &QPushButton::clicked, this, [this]() {
+        emit focusPointRequested(
+            static_cast<float>(focusPointXSpinBox_->value()),
+            static_cast<float>(focusPointYSpinBox_->value()),
+            static_cast<float>(focusPointZSpinBox_->value()));
+    });
+
     formLayout->addRow("Distance", distanceSpinBox_);
     formLayout->addRow("Vertical FOV", fovSpinBox_);
+    formLayout->addRow("Near / Far", nearFarLabel_);
     formLayout->addRow("Orbit Center", orbitCenterLabel_);
+    formLayout->addRow("Point X", focusPointXSpinBox_);
+    formLayout->addRow("Point Y", focusPointYSpinBox_);
+    formLayout->addRow("Point Z", focusPointZSpinBox_);
+    formLayout->addRow("", focusPointButton_);
 
     rootLayout->addWidget(group);
 }
@@ -56,12 +94,21 @@ CameraControlWidget::CameraControlWidget(QWidget* parent)
 void CameraControlWidget::setCameraState(
     float distance,
     float verticalFovDegrees,
+    float nearPlane,
+    float farPlane,
     const renderer::scene_contract::Vec3f& orbitCenter)
 {
     const QSignalBlocker distanceBlocker(distanceSpinBox_);
     const QSignalBlocker fovBlocker(fovSpinBox_);
+    const QSignalBlocker pointXBlocker(focusPointXSpinBox_);
+    const QSignalBlocker pointYBlocker(focusPointYSpinBox_);
+    const QSignalBlocker pointZBlocker(focusPointZSpinBox_);
 
     distanceSpinBox_->setValue(distance);
     fovSpinBox_->setValue(verticalFovDegrees);
+    nearFarLabel_->setText(formatNearFarText(nearPlane, farPlane));
     orbitCenterLabel_->setText(formatOrbitCenterText(orbitCenter));
+    focusPointXSpinBox_->setValue(orbitCenter.x);
+    focusPointYSpinBox_->setValue(orbitCenter.y);
+    focusPointZSpinBox_->setValue(orbitCenter.z);
 }

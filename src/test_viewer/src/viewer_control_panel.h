@@ -25,6 +25,8 @@ public:
     void setCameraState(
         float distance,
         float verticalFovDegrees,
+        float nearPlane,
+        float farPlane,
         const renderer::scene_contract::Vec3f& orbitCenter);
 
 signals:
@@ -35,6 +37,8 @@ signals:
     void lightDirectionChanged(float x, float y, float z);
     void cameraDistanceChanged(float distance);
     void verticalFovDegreesChanged(float degrees);
+    void focusPointRequested(float x, float y, float z);
+    void focusAllRequested();
     void resetDefaultsRequested();
     void focusSphereRequested();
 

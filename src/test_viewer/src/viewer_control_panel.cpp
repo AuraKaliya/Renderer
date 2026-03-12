@@ -70,6 +70,9 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(cameraWidget_, &CameraControlWidget::verticalFovDegreesChanged, this, [this](float degrees) {
         emit verticalFovDegreesChanged(degrees);
     });
+    connect(cameraWidget_, &CameraControlWidget::focusPointRequested, this, [this](float x, float y, float z) {
+        emit focusPointRequested(x, y, z);
+    });
 
     auto* actionGroup = new QGroupBox("Actions", this);
     auto* actionLayout = new QVBoxLayout(actionGroup);
@@ -94,8 +97,14 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         emit focusSphereRequested();
     });
 
+    auto* focusAllButton = new QPushButton("Focus All", actionGroup);
+    connect(focusAllButton, &QPushButton::clicked, this, [this]() {
+        emit focusAllRequested();
+    });
+
     actionLayout->addWidget(resetButton);
     actionLayout->addWidget(sphereFocusButton);
+    actionLayout->addWidget(focusAllButton);
 
     rootLayout->addWidget(lightingWidget_);
     rootLayout->addWidget(cameraWidget_);
@@ -137,7 +146,9 @@ void ViewerControlPanel::setLightingState(float ambientStrength, const renderer:
 void ViewerControlPanel::setCameraState(
     float distance,
     float verticalFovDegrees,
+    float nearPlane,
+    float farPlane,
     const renderer::scene_contract::Vec3f& orbitCenter)
 {
-    cameraWidget_->setCameraState(distance, verticalFovDegrees, orbitCenter);
+    cameraWidget_->setCameraState(distance, verticalFovDegrees, nearPlane, farPlane, orbitCenter);
 }
