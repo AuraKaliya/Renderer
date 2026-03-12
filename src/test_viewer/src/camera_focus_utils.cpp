@@ -8,9 +8,7 @@
 namespace {
 
 constexpr float kMinDistance = 1.5F;
-constexpr float kMinNearPlane = 0.01F;
 constexpr float kBoundsPadding = 1.15F;
-constexpr float kBoundsClipPadding = 1.2F;
 constexpr float kMinRadius = 0.25F;
 
 float degreesToRadians(float degrees) {
@@ -63,8 +61,6 @@ camera_focus::FocusSettings camera_focus::makeFocusSettingsForBounds(
     const float distance = (radius * kBoundsPadding) / std::max(std::sin(halfAngle), 0.1F);
 
     settings.distance = std::max(kMinDistance, distance);
-    settings.nearPlane = std::max(kMinNearPlane, settings.distance - radius * kBoundsClipPadding);
-    settings.farPlane = std::max(settings.nearPlane + 1.0F, settings.distance + radius * kBoundsClipPadding);
     return settings;
 }
 
@@ -75,7 +71,5 @@ camera_focus::FocusSettings camera_focus::makeFocusSettingsForPoint(
     FocusSettings settings;
     settings.orbitCenter = point;
     settings.distance = std::max(kMinDistance, currentDistance);
-    settings.nearPlane = std::max(kMinNearPlane, settings.distance * 0.05F);
-    settings.farPlane = std::max(settings.nearPlane + 1.0F, settings.distance * 4.0F);
     return settings;
 }

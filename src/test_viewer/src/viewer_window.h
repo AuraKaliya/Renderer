@@ -82,6 +82,7 @@ private:
 
     private:
         void updateSceneTransforms();
+        [[nodiscard]] renderer::scene_contract::Aabb focusBoundsForObject(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleSceneBounds() const;
         void rebuildFramePacket();
 

@@ -7,8 +7,6 @@ namespace camera_focus {
 struct FocusSettings {
     renderer::scene_contract::Vec3f orbitCenter {};
     float distance = 1.5F;
-    float nearPlane = 0.01F;
-    float farPlane = 10.0F;
 };
 
 [[nodiscard]] FocusSettings makeFocusSettingsForBounds(

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "camera.h"
+#include "camera_clip_utils.h"
 #include "camera_focus_utils.h"
 
 namespace {
@@ -65,6 +66,14 @@ float clampPitchRadians(float radians) {
     return radians;
 }
 
+renderer::scene_contract::Vec3f aabbCenter(const renderer::scene_contract::Aabb& bounds) {
+    return {
+        (bounds.min.x + bounds.max.x) * 0.5F,
+        (bounds.min.y + bounds.max.y) * 0.5F,
+        (bounds.min.z + bounds.max.z) * 0.5F
+    };
+}
+
 }  // namespace
 
 void OrbitCameraController::setViewportSize(int width, int height) {
@@ -102,6 +111,33 @@ void OrbitCameraController::setVerticalFovDegrees(float degrees) {
 
 float OrbitCameraController::verticalFovDegrees() const {
     return verticalFovDegrees_;
+}
+
+void OrbitCameraController::setOrthographicHeight(float height) {
+    if (height < 0.1F) {
+        height = 0.1F;
+    }
+    orthographicHeight_ = height;
+}
+
+float OrbitCameraController::orthographicHeight() const {
+    return orthographicHeight_;
+}
+
+void OrbitCameraController::setProjectionMode(ProjectionMode mode) {
+    projectionMode_ = mode;
+}
+
+OrbitCameraController::ProjectionMode OrbitCameraController::projectionMode() const {
+    return projectionMode_;
+}
+
+void OrbitCameraController::setZoomMode(ZoomMode mode) {
+    zoomMode_ = mode;
+}
+
+OrbitCameraController::ZoomMode OrbitCameraController::zoomMode() const {
+    return zoomMode_;
 }
 
 void OrbitCameraController::setProjection(float verticalFovDegrees, float nearPlane, float farPlane) {
@@ -153,8 +189,7 @@ void OrbitCameraController::focusOnPoint(const renderer::scene_contract::Vec3f& 
     const auto focusSettings = camera_focus::makeFocusSettingsForPoint(point, distance_);
     setOrbitCenter(focusSettings.orbitCenter);
     setDistance(focusSettings.distance);
-    setNearPlane(focusSettings.nearPlane);
-    setFarPlane(focusSettings.farPlane);
+    updateClipRangeForPoint(point);
 }
 
 void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& bounds) {
@@ -169,8 +204,25 @@ void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& 
         verticalFovDegrees_);
     setOrbitCenter(focusSettings.orbitCenter);
     setDistance(focusSettings.distance);
-    setNearPlane(focusSettings.nearPlane);
-    setFarPlane(focusSettings.farPlane);
+    updateClipRangeForBounds(bounds);
+}
+
+void OrbitCameraController::updateClipRangeForPoint(const renderer::scene_contract::Vec3f& point) {
+    const auto distanceToPoint = length(subtract(position(), point));
+    const auto clipRange = camera_clip::makeClipRangeForPoint(distanceToPoint);
+    setNearPlane(clipRange.nearPlane);
+    setFarPlane(clipRange.farPlane);
+}
+
+void OrbitCameraController::updateClipRangeForBounds(const renderer::scene_contract::Aabb& bounds) {
+    if (!bounds.valid) {
+        return;
+    }
+
+    const auto distanceToCenter = length(subtract(position(), aabbCenter(bounds)));
+    const auto clipRange = camera_clip::makeClipRangeForBounds(bounds, distanceToCenter);
+    setNearPlane(clipRange.nearPlane);
+    setFarPlane(clipRange.farPlane);
 }
 
 void OrbitCameraController::setNearPlane(float value) {
@@ -214,8 +266,14 @@ renderer::scene_contract::CameraData OrbitCameraController::buildCameraData() co
     camera.setTarget(orbitCenter_);
     camera.setUp({0.0F, 1.0F, 0.0F});
     camera.setPosition(position());
-    camera.setVerticalFovDegrees(verticalFovDegrees_);
     camera.setNearPlane(nearPlane_);
     camera.setFarPlane(farPlane_);
+    if (projectionMode_ == ProjectionMode::perspective) {
+        camera.setVerticalFovDegrees(verticalFovDegrees_);
+    } else {
+        // Orthographic rendering is not enabled yet. Keep the current output stable
+        // by using the perspective path until the projection branch is implemented.
+        camera.setVerticalFovDegrees(verticalFovDegrees_);
+    }
     return camera.buildCameraData();
 }

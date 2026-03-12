@@ -175,6 +175,50 @@ renderer::scene_contract::Aabb mergeAabb(
     return merged;
 }
 
+renderer::scene_contract::Vec3f aabbCenter(const renderer::scene_contract::Aabb& bounds) {
+    return {
+        (bounds.min.x + bounds.max.x) * 0.5F,
+        (bounds.min.y + bounds.max.y) * 0.5F,
+        (bounds.min.z + bounds.max.z) * 0.5F
+    };
+}
+
+renderer::scene_contract::Vec3f aabbHalfExtent(const renderer::scene_contract::Aabb& bounds) {
+    return {
+        (bounds.max.x - bounds.min.x) * 0.5F,
+        (bounds.max.y - bounds.min.y) * 0.5F,
+        (bounds.max.z - bounds.min.z) * 0.5F
+    };
+}
+
+renderer::scene_contract::Vec3f transformPoint(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec3f& point)
+{
+    return {
+        matrix.elements[0] * point.x + matrix.elements[4] * point.y + matrix.elements[8] * point.z + matrix.elements[12],
+        matrix.elements[1] * point.x + matrix.elements[5] * point.y + matrix.elements[9] * point.z + matrix.elements[13],
+        matrix.elements[2] * point.x + matrix.elements[6] * point.y + matrix.elements[10] * point.z + matrix.elements[14]
+    };
+}
+
+float axisScaleLength(const renderer::scene_contract::Mat4f& matrix, int columnOffset) {
+    const renderer::scene_contract::Vec3f axis = {
+        matrix.elements[columnOffset + 0],
+        matrix.elements[columnOffset + 1],
+        matrix.elements[columnOffset + 2]
+    };
+    return renderer::scene_contract::math::length(axis);
+}
+
+float maxAxisScale(const renderer::scene_contract::Mat4f& matrix) {
+    return std::max({
+        axisScaleLength(matrix, 0),
+        axisScaleLength(matrix, 4),
+        axisScaleLength(matrix, 8)
+    });
+}
+
 }  // namespace
 
 ViewerWindow::ViewerWindow() {
@@ -359,7 +403,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     }
 
     updateSceneTransforms();
-    cameraController_.focusOnBounds(repository_.rangeData(sceneObjects_[2].itemId).worldBounds);
+    cameraController_.focusOnBounds(focusBoundsForObject(2));
     if (cameraStateChangedCallback_) {
         cameraStateChangedCallback_();
     }
@@ -704,6 +748,13 @@ void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
     }
 
     cameraController_.zoom(-static_cast<float>(angleDelta.y()) / 120.0F * kWheelZoomStep);
+    updateSceneTransforms();
+    const auto bounds = visibleSceneBounds();
+    if (bounds.valid) {
+        cameraController_.updateClipRangeForBounds(bounds);
+    } else {
+        cameraController_.updateClipRangeForPoint(cameraController_.orbitCenter());
+    }
     if (cameraStateChangedCallback_) {
         cameraStateChangedCallback_();
     }
@@ -728,12 +779,45 @@ void ViewerWindow::Viewport::updateSceneTransforms() {
 
 renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleSceneBounds() const {
     renderer::scene_contract::Aabb bounds;
-    for (const auto& sceneObject : sceneObjects_) {
-        if (!sceneObject.visible) {
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        if (!sceneObjects_[index].visible) {
             continue;
         }
-        bounds = mergeAabb(bounds, repository_.rangeData(sceneObject.itemId).worldBounds);
+        bounds = mergeAabb(bounds, focusBoundsForObject(index));
     }
+    return bounds;
+}
+
+renderer::scene_contract::Aabb ViewerWindow::Viewport::focusBoundsForObject(int index) const {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return {};
+    }
+
+    const auto& sceneObject = sceneObjects_[index];
+    const auto& localBounds = sceneObject.meshData.localBounds;
+    if (!localBounds.valid) {
+        return {};
+    }
+
+    const float elapsedSeconds = static_cast<float>(animationClock_.elapsed()) / 1000.0F;
+    const auto transform = makeSceneTransform(
+        elapsedSeconds,
+        sceneObject.offsetX,
+        sceneObject.offsetY,
+        sceneObject.offsetZ,
+        sceneObject.scale,
+        sceneObject.rotationSpeed);
+
+    const auto localCenter = aabbCenter(localBounds);
+    const auto worldCenter = transformPoint(transform.world, localCenter);
+    const auto halfExtent = aabbHalfExtent(localBounds);
+    const float radius =
+        renderer::scene_contract::math::length(halfExtent) * std::max(maxAxisScale(transform.world), 1.0F);
+
+    renderer::scene_contract::Aabb bounds;
+    bounds.min = {worldCenter.x - radius, worldCenter.y - radius, worldCenter.z - radius};
+    bounds.max = {worldCenter.x + radius, worldCenter.y + radius, worldCenter.z + radius};
+    bounds.valid = true;
     return bounds;
 }
 
