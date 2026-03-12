@@ -10,6 +10,8 @@ namespace {
 
 constexpr float kMinPitchRadians = -1.45F;
 constexpr float kMaxPitchRadians = 1.45F;
+constexpr float kOrthographicZoomScale = 0.15F;
+constexpr float kMinOrthographicZoomStep = 0.1F;
 
 renderer::scene_contract::Vec3f add(
     const renderer::scene_contract::Vec3f& left,
@@ -126,6 +128,9 @@ float OrbitCameraController::orthographicHeight() const {
 
 void OrbitCameraController::setProjectionMode(ProjectionMode mode) {
     projectionMode_ = mode;
+    zoomMode_ = (projectionMode_ == ProjectionMode::orthographic)
+        ? ZoomMode::lens
+        : ZoomMode::dolly;
 }
 
 OrbitCameraController::ProjectionMode OrbitCameraController::projectionMode() const {
@@ -168,6 +173,12 @@ void OrbitCameraController::rotate(float deltaYawRadians, float deltaPitchRadian
 }
 
 void OrbitCameraController::zoom(float deltaDistance) {
+    if (projectionMode_ == ProjectionMode::orthographic && zoomMode_ == ZoomMode::lens) {
+        const float zoomStep = std::max(kMinOrthographicZoomStep, orthographicHeight_ * kOrthographicZoomScale);
+        setOrthographicHeight(orthographicHeight_ + deltaDistance * zoomStep);
+        return;
+    }
+
     setDistance(distance_ + deltaDistance);
 }
 
@@ -186,9 +197,16 @@ void OrbitCameraController::pan(float deltaRight, float deltaUp) {
 }
 
 void OrbitCameraController::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
-    const auto focusSettings = camera_focus::makeFocusSettingsForPoint(point, distance_);
+    const auto focusSettings = camera_focus::makeFocusSettingsForPoint(
+        point,
+        projectionMode_ == ProjectionMode::orthographic
+            ? camera_focus::ProjectionMode::orthographic
+            : camera_focus::ProjectionMode::perspective,
+        distance_,
+        orthographicHeight_);
     setOrbitCenter(focusSettings.orbitCenter);
     setDistance(focusSettings.distance);
+    setOrthographicHeight(focusSettings.orthographicHeight);
     updateClipRangeForPoint(point);
 }
 
@@ -199,11 +217,17 @@ void OrbitCameraController::focusOnBounds(const renderer::scene_contract::Aabb& 
 
     const auto focusSettings = camera_focus::makeFocusSettingsForBounds(
         bounds,
+        projectionMode_ == ProjectionMode::orthographic
+            ? camera_focus::ProjectionMode::orthographic
+            : camera_focus::ProjectionMode::perspective,
         viewportWidth_,
         viewportHeight_,
-        verticalFovDegrees_);
+        verticalFovDegrees_,
+        distance_,
+        orthographicHeight_);
     setOrbitCenter(focusSettings.orbitCenter);
     setDistance(focusSettings.distance);
+    setOrthographicHeight(focusSettings.orthographicHeight);
     updateClipRangeForBounds(bounds);
 }
 

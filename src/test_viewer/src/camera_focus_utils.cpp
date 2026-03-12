@@ -10,6 +10,7 @@ namespace {
 constexpr float kMinDistance = 1.5F;
 constexpr float kBoundsPadding = 1.15F;
 constexpr float kMinRadius = 0.25F;
+constexpr float kMinOrthographicHeight = 0.1F;
 
 float degreesToRadians(float degrees) {
     return degrees * renderer::scene_contract::math::kPi / 180.0F;
@@ -45,16 +46,40 @@ float boundsRadius(const renderer::scene_contract::Aabb& bounds) {
     return std::max(kMinRadius, renderer::scene_contract::math::length(halfExtent));
 }
 
+float aspectRatio(int viewportWidth, int viewportHeight) {
+    return static_cast<float>(std::max(viewportWidth, 1)) / static_cast<float>(std::max(viewportHeight, 1));
+}
+
+float fittingOrthographicHeight(const renderer::scene_contract::Aabb& bounds, int viewportWidth, int viewportHeight) {
+    const auto halfExtent = aabbHalfExtent(bounds);
+    const float safeAspectRatio = std::max(aspectRatio(viewportWidth, viewportHeight), 0.0001F);
+    const float requiredHeightFromWidth = (halfExtent.x * 2.0F) / safeAspectRatio;
+    const float requiredHeightFromHeight = halfExtent.y * 2.0F;
+    return std::max(
+        kMinOrthographicHeight,
+        std::max(requiredHeightFromWidth, requiredHeightFromHeight) * kBoundsPadding);
+}
+
 }  // namespace
 
 camera_focus::FocusSettings camera_focus::makeFocusSettingsForBounds(
     const renderer::scene_contract::Aabb& bounds,
+    ProjectionMode projectionMode,
     int viewportWidth,
     int viewportHeight,
-    float verticalFovDegrees)
+    float verticalFovDegrees,
+    float currentDistance,
+    float currentOrthographicHeight)
 {
     FocusSettings settings;
     settings.orbitCenter = aabbCenter(bounds);
+    settings.distance = std::max(kMinDistance, currentDistance);
+    settings.orthographicHeight = std::max(kMinOrthographicHeight, currentOrthographicHeight);
+
+    if (projectionMode == ProjectionMode::orthographic) {
+        settings.orthographicHeight = fittingOrthographicHeight(bounds, viewportWidth, viewportHeight);
+        return settings;
+    }
 
     const float radius = boundsRadius(bounds);
     const float halfAngle = fittingHalfAngleRadians(viewportWidth, viewportHeight, verticalFovDegrees);
@@ -66,10 +91,61 @@ camera_focus::FocusSettings camera_focus::makeFocusSettingsForBounds(
 
 camera_focus::FocusSettings camera_focus::makeFocusSettingsForPoint(
     const renderer::scene_contract::Vec3f& point,
-    float currentDistance)
+    ProjectionMode projectionMode,
+    float currentDistance,
+    float currentOrthographicHeight)
 {
     FocusSettings settings;
     settings.orbitCenter = point;
     settings.distance = std::max(kMinDistance, currentDistance);
+    settings.orthographicHeight = std::max(kMinOrthographicHeight, currentOrthographicHeight);
+
+    if (projectionMode == ProjectionMode::orthographic) {
+        return settings;
+    }
+
     return settings;
+}
+
+camera_focus::FocusSettings camera_focus::makeFocusSettingsForBoundsPerspective(
+    const renderer::scene_contract::Aabb& bounds,
+    int viewportWidth,
+    int viewportHeight,
+    float verticalFovDegrees)
+{
+    return makeFocusSettingsForBounds(
+        bounds,
+        ProjectionMode::perspective,
+        viewportWidth,
+        viewportHeight,
+        verticalFovDegrees,
+        kMinDistance,
+        8.0F);
+}
+
+camera_focus::FocusSettings camera_focus::makeFocusSettingsForPointPerspective(
+    const renderer::scene_contract::Vec3f& point,
+    float currentDistance)
+{
+    return makeFocusSettingsForPoint(
+        point,
+        ProjectionMode::perspective,
+        currentDistance,
+        8.0F);
+}
+
+camera_focus::FocusSettings camera_focus::makeFocusSettingsForBounds(
+    const renderer::scene_contract::Aabb& bounds,
+    int viewportWidth,
+    int viewportHeight,
+    float verticalFovDegrees)
+{
+    return makeFocusSettingsForBoundsPerspective(bounds, viewportWidth, viewportHeight, verticalFovDegrees);
+}
+
+camera_focus::FocusSettings camera_focus::makeFocusSettingsForPoint(
+    const renderer::scene_contract::Vec3f& point,
+    float currentDistance)
+{
+    return makeFocusSettingsForPointPerspective(point, currentDistance);
 }

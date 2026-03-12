@@ -16,6 +16,7 @@ public:
 
     void setCameraState(
         int projectionMode,
+        int zoomMode,
         float distance,
         float verticalFovDegrees,
         float orthographicHeight,
@@ -38,6 +39,7 @@ private:
     QDoubleSpinBox* focusPointXSpinBox_ = nullptr;
     QDoubleSpinBox* focusPointYSpinBox_ = nullptr;
     QDoubleSpinBox* focusPointZSpinBox_ = nullptr;
+    QLabel* zoomModeLabel_ = nullptr;
     QLabel* orbitCenterLabel_ = nullptr;
     QLabel* nearFarLabel_ = nullptr;
     QPushButton* focusPointButton_ = nullptr;

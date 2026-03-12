@@ -447,6 +447,10 @@ OrbitCameraController::ProjectionMode ViewerWindow::Viewport::projectionMode() c
     return cameraController_.projectionMode();
 }
 
+OrbitCameraController::ZoomMode ViewerWindow::Viewport::zoomMode() const {
+    return cameraController_.zoomMode();
+}
+
 void ViewerWindow::Viewport::setVerticalFovDegrees(float degrees) {
     cameraController_.setVerticalFovDegrees(degrees);
     notifyCameraStateChanged();
@@ -829,6 +833,7 @@ void ViewerWindow::syncControlPanel() {
         viewport_->lightDirection());
     controlPanel_->setCameraState(
         viewport_->projectionMode() == OrbitCameraController::ProjectionMode::orthographic ? 1 : 0,
+        viewport_->zoomMode() == OrbitCameraController::ZoomMode::lens ? 1 : 0,
         viewport_->cameraDistance(),
         viewport_->verticalFovDegrees(),
         viewport_->orthographicHeight(),

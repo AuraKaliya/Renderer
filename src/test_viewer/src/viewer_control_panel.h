@@ -24,6 +24,7 @@ public:
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(
         int projectionMode,
+        int zoomMode,
         float distance,
         float verticalFovDegrees,
         float orthographicHeight,

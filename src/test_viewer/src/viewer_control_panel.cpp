@@ -151,6 +151,7 @@ void ViewerControlPanel::setLightingState(float ambientStrength, const renderer:
 
 void ViewerControlPanel::setCameraState(
     int projectionMode,
+    int zoomMode,
     float distance,
     float verticalFovDegrees,
     float orthographicHeight,
@@ -160,6 +161,7 @@ void ViewerControlPanel::setCameraState(
 {
     cameraWidget_->setCameraState(
         projectionMode,
+        zoomMode,
         distance,
         verticalFovDegrees,
         orthographicHeight,
