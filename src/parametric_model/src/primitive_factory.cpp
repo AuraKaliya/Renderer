@@ -6,6 +6,10 @@ namespace renderer::parametric_model {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
+constexpr float kMinimumDimension = 0.0001F;
+constexpr std::uint32_t kMinimumCylinderSegments = 3U;
+constexpr std::uint32_t kMinimumSphereSlices = 3U;
+constexpr std::uint32_t kMinimumSphereStacks = 2U;
 
 renderer::scene_contract::VertexPNT makeVertex(
     float px,
@@ -87,16 +91,41 @@ scene_contract::Aabb computeBoundsFromVertices(const std::vector<scene_contract:
     return bounds;
 }
 
-}  // namespace
+float clampDimension(float value) {
+    return value > kMinimumDimension ? value : kMinimumDimension;
+}
 
-scene_contract::MeshData PrimitiveFactory::makeBox(
-    float width,
-    float height,
-    float depth)
-{
-    const float hx = width * 0.5F;
-    const float hy = height * 0.5F;
-    const float hz = depth * 0.5F;
+BoxSpec normalizeBoxSpec(BoxSpec spec) {
+    spec.width = clampDimension(spec.width);
+    spec.height = clampDimension(spec.height);
+    spec.depth = clampDimension(spec.depth);
+    return spec;
+}
+
+CylinderSpec normalizeCylinderSpec(CylinderSpec spec) {
+    spec.radius = clampDimension(spec.radius);
+    spec.height = clampDimension(spec.height);
+    if (spec.segments < kMinimumCylinderSegments) {
+        spec.segments = kMinimumCylinderSegments;
+    }
+    return spec;
+}
+
+SphereSpec normalizeSphereSpec(SphereSpec spec) {
+    spec.radius = clampDimension(spec.radius);
+    if (spec.slices < kMinimumSphereSlices) {
+        spec.slices = kMinimumSphereSlices;
+    }
+    if (spec.stacks < kMinimumSphereStacks) {
+        spec.stacks = kMinimumSphereStacks;
+    }
+    return spec;
+}
+
+scene_contract::MeshData buildBoxMesh(const BoxSpec& spec) {
+    const float hx = spec.width * 0.5F;
+    const float hy = spec.height * 0.5F;
+    const float hz = spec.depth * 0.5F;
 
     scene_contract::MeshData mesh;
     mesh.vertices = {
@@ -144,25 +173,18 @@ scene_contract::MeshData PrimitiveFactory::makeBox(
     return mesh;
 }
 
-scene_contract::MeshData PrimitiveFactory::makeCylinder(
-    float radius,
-    float height,
-    std::uint32_t segments) {
+scene_contract::MeshData buildCylinderMesh(const CylinderSpec& spec) {
     scene_contract::MeshData mesh;
-    if (segments < 3U) {
-        return mesh;
-    }
+    const float halfHeight = spec.height * 0.5F;
 
-    const float halfHeight = height * 0.5F;
+    for (std::uint32_t segment = 0; segment < spec.segments; ++segment) {
+        const float currentAngle = (2.0F * kPi * static_cast<float>(segment)) / static_cast<float>(spec.segments);
+        const float nextAngle = (2.0F * kPi * static_cast<float>(segment + 1U)) / static_cast<float>(spec.segments);
 
-    for (std::uint32_t segment = 0; segment < segments; ++segment) {
-        const float currentAngle = (2.0F * kPi * static_cast<float>(segment)) / static_cast<float>(segments);
-        const float nextAngle = (2.0F * kPi * static_cast<float>(segment + 1U)) / static_cast<float>(segments);
-
-        const float currentX = radius * std::cos(currentAngle);
-        const float currentZ = radius * std::sin(currentAngle);
-        const float nextX = radius * std::cos(nextAngle);
-        const float nextZ = radius * std::sin(nextAngle);
+        const float currentX = spec.radius * std::cos(currentAngle);
+        const float currentZ = spec.radius * std::sin(currentAngle);
+        const float nextX = spec.radius * std::cos(nextAngle);
+        const float nextZ = spec.radius * std::sin(nextAngle);
 
         const renderer::scene_contract::Vec3f currentNormal = {
             std::cos(currentAngle),
@@ -200,36 +222,28 @@ scene_contract::MeshData PrimitiveFactory::makeCylinder(
             makeVertex(nextX, -halfHeight, nextZ, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F));
     }
 
-    mesh.localBounds = makeAabb(-radius, -halfHeight, -radius, radius, halfHeight, radius);
-
+    mesh.localBounds = makeAabb(-spec.radius, -halfHeight, -spec.radius, spec.radius, halfHeight, spec.radius);
     return mesh;
 }
 
-scene_contract::MeshData PrimitiveFactory::makeSphere(
-    float radius,
-    std::uint32_t slices,
-    std::uint32_t stacks) {
+scene_contract::MeshData buildSphereMesh(const SphereSpec& spec) {
     scene_contract::MeshData mesh;
-    if (slices < 3U || stacks < 2U) {
-        return mesh;
-    }
-
-    for (std::uint32_t stack = 0; stack <= stacks; ++stack) {
-        const float v = static_cast<float>(stack) / static_cast<float>(stacks);
+    for (std::uint32_t stack = 0; stack <= spec.stacks; ++stack) {
+        const float v = static_cast<float>(stack) / static_cast<float>(spec.stacks);
         const float phi = kPi * v;
         const float y = std::cos(phi);
         const float ringRadius = std::sin(phi);
 
-        for (std::uint32_t slice = 0; slice <= slices; ++slice) {
-            const float u = static_cast<float>(slice) / static_cast<float>(slices);
+        for (std::uint32_t slice = 0; slice <= spec.slices; ++slice) {
+            const float u = static_cast<float>(slice) / static_cast<float>(spec.slices);
             const float theta = 2.0F * kPi * u;
             const float x = ringRadius * std::cos(theta);
             const float z = ringRadius * std::sin(theta);
 
             mesh.vertices.push_back(makeVertex(
-                radius * x,
-                radius * y,
-                radius * z,
+                spec.radius * x,
+                spec.radius * y,
+                spec.radius * z,
                 x,
                 y,
                 z,
@@ -238,9 +252,9 @@ scene_contract::MeshData PrimitiveFactory::makeSphere(
         }
     }
 
-    const std::uint32_t stride = slices + 1U;
-    for (std::uint32_t stack = 0; stack < stacks; ++stack) {
-        for (std::uint32_t slice = 0; slice < slices; ++slice) {
+    const std::uint32_t stride = spec.slices + 1U;
+    for (std::uint32_t stack = 0; stack < spec.stacks; ++stack) {
+        for (std::uint32_t slice = 0; slice < spec.slices; ++slice) {
             const std::uint32_t current = stack * stride + slice;
             const std::uint32_t next = current + stride;
 
@@ -255,8 +269,77 @@ scene_contract::MeshData PrimitiveFactory::makeSphere(
     }
 
     mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
-
     return mesh;
+}
+
+}  // namespace
+
+PrimitiveDescriptor PrimitiveFactory::makeBoxDescriptor(
+    float width,
+    float height,
+    float depth)
+{
+    PrimitiveDescriptor descriptor;
+    descriptor.kind = PrimitiveKind::box;
+    descriptor.box = {width, height, depth};
+    return descriptor;
+}
+
+PrimitiveDescriptor PrimitiveFactory::makeCylinderDescriptor(
+    float radius,
+    float height,
+    std::uint32_t segments)
+{
+    PrimitiveDescriptor descriptor;
+    descriptor.kind = PrimitiveKind::cylinder;
+    descriptor.cylinder = {radius, height, segments};
+    return descriptor;
+}
+
+PrimitiveDescriptor PrimitiveFactory::makeSphereDescriptor(
+    float radius,
+    std::uint32_t slices,
+    std::uint32_t stacks)
+{
+    PrimitiveDescriptor descriptor;
+    descriptor.kind = PrimitiveKind::sphere;
+    descriptor.sphere = {radius, slices, stacks};
+    return descriptor;
+}
+
+scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& descriptor) {
+    switch (descriptor.kind) {
+    case PrimitiveKind::box:
+        return buildBoxMesh(normalizeBoxSpec(descriptor.box));
+    case PrimitiveKind::cylinder:
+        return buildCylinderMesh(normalizeCylinderSpec(descriptor.cylinder));
+    case PrimitiveKind::sphere:
+        return buildSphereMesh(normalizeSphereSpec(descriptor.sphere));
+    }
+
+    return {};
+}
+
+scene_contract::MeshData PrimitiveFactory::makeBox(
+    float width,
+    float height,
+    float depth)
+{
+    return build(makeBoxDescriptor(width, height, depth));
+}
+
+scene_contract::MeshData PrimitiveFactory::makeCylinder(
+    float radius,
+    float height,
+    std::uint32_t segments) {
+    return build(makeCylinderDescriptor(radius, height, segments));
+}
+
+scene_contract::MeshData PrimitiveFactory::makeSphere(
+    float radius,
+    std::uint32_t slices,
+    std::uint32_t stacks) {
+    return build(makeSphereDescriptor(radius, slices, stacks));
 }
 
 }  // namespace renderer::parametric_model

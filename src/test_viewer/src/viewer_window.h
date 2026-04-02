@@ -22,6 +22,7 @@ class QPointF;
 #include "model_change_view_state.h"
 #include "viewport_zoom_state.h"
 #include "viewer_control_panel.h"
+#include "renderer/parametric_model/primitive_factory.h"
 #include "renderer/render_core/frame_assembler.h"
 #include "renderer/render_core/scene_repository.h"
 #include "renderer/scene_contract/types.h"
@@ -71,6 +72,19 @@ private:
         [[nodiscard]] float verticalFovDegrees() const;
         void setOrthographicHeight(float height);
         [[nodiscard]] float orthographicHeight() const;
+        void setBoxWidth(float width);
+        [[nodiscard]] float boxWidth() const;
+        void setBoxHeight(float height);
+        void setBoxDepth(float depth);
+        void setCylinderRadius(float radius);
+        void setCylinderHeight(float height);
+        void setCylinderSegments(std::uint32_t segments);
+        void setSphereRadius(float radius);
+        void setSphereSlices(std::uint32_t slices);
+        void setSphereStacks(std::uint32_t stacks);
+        [[nodiscard]] renderer::parametric_model::BoxSpec boxSpec() const;
+        [[nodiscard]] renderer::parametric_model::CylinderSpec cylinderSpec() const;
+        [[nodiscard]] renderer::parametric_model::SphereSpec sphereSpec() const;
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
         [[nodiscard]] ViewerControlPanel::CameraPanelState cameraPanelState() const;
@@ -103,6 +117,8 @@ private:
         void notifyCameraStateChanged();
         void refreshViewportZoomState();
         void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
+        void applyPrimitiveDescriptor(int index, const renderer::parametric_model::PrimitiveDescriptor& descriptor);
+        void rebuildObjectMesh(int index);
         void updateSceneTransforms();
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
@@ -114,6 +130,7 @@ private:
             renderer::scene_contract::MeshHandle meshHandle = renderer::scene_contract::kInvalidMeshHandle;
             renderer::scene_contract::MaterialHandle materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
             renderer::scene_contract::TextureHandle textureHandle = renderer::scene_contract::kInvalidTextureHandle;
+            renderer::parametric_model::PrimitiveDescriptor primitiveDescriptor {};
             renderer::scene_contract::MeshData meshData;
             renderer::scene_contract::TextureData textureData;
             renderer::scene_contract::MaterialData materialData;

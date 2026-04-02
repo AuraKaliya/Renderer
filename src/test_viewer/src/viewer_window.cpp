@@ -38,6 +38,27 @@ const std::array<SceneObjectDefaults, kSceneObjectCount> kDefaultSceneObjects = 
     {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 1.25F, true}
 }};
 
+const std::array<renderer::parametric_model::PrimitiveDescriptor, kSceneObjectCount> kDefaultPrimitiveDescriptors = {{
+    {
+        renderer::parametric_model::PrimitiveKind::box,
+        {1.0F, 1.0F, 1.0F},
+        {},
+        {}
+    },
+    {
+        renderer::parametric_model::PrimitiveKind::cylinder,
+        {},
+        {0.55F, 1.35F, 32U},
+        {}
+    },
+    {
+        renderer::parametric_model::PrimitiveKind::sphere,
+        {},
+        {},
+        {0.7F, 28U, 18U}
+    }
+}};
+
 const renderer::scene_contract::DirectionalLightData kDefaultLight = {
     {-0.4F, -1.0F, -0.35F},
     {1.0F, 0.98F, 0.92F},
@@ -297,6 +318,33 @@ void ViewerWindow::bindControlPanelSignals() {
                 ? model_change_view::ViewStrategy::auto_frame
                 : model_change_view::ViewStrategy::keep_view);
     });
+    connect(controlPanel_, &ViewerControlPanel::boxWidthChanged, this, [this](float width) {
+        viewport_->setBoxWidth(width);
+    });
+    connect(controlPanel_, &ViewerControlPanel::boxHeightChanged, this, [this](float height) {
+        viewport_->setBoxHeight(height);
+    });
+    connect(controlPanel_, &ViewerControlPanel::boxDepthChanged, this, [this](float depth) {
+        viewport_->setBoxDepth(depth);
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderRadiusChanged, this, [this](float radius) {
+        viewport_->setCylinderRadius(radius);
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderHeightChanged, this, [this](float height) {
+        viewport_->setCylinderHeight(height);
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderSegmentsChanged, this, [this](int segments) {
+        viewport_->setCylinderSegments(static_cast<std::uint32_t>(segments));
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereRadiusChanged, this, [this](float radius) {
+        viewport_->setSphereRadius(radius);
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereSlicesChanged, this, [this](int slices) {
+        viewport_->setSphereSlices(static_cast<std::uint32_t>(slices));
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereStacksChanged, this, [this](int stacks) {
+        viewport_->setSphereStacks(static_cast<std::uint32_t>(stacks));
+    });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
     });
@@ -328,7 +376,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     setFormat(makeFormat());
     setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
-    sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::makeBox(1.0F, 1.0F, 1.0F);
+    sceneObjects_[0].primitiveDescriptor = kDefaultPrimitiveDescriptors[0];
+    sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[0].primitiveDescriptor);
     sceneObjects_[0].textureData = makeCheckerTextureData(64, 64, 8U);
     sceneObjects_[0].materialData.baseColor = kDefaultSceneObjects[0].color;
     sceneObjects_[0].materialData.useBaseColorTexture = true;
@@ -339,7 +388,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     sceneObjects_[0].rotationSpeed = kDefaultSceneObjects[0].rotationSpeed;
     sceneObjects_[0].visible = kDefaultSceneObjects[0].visible;
 
-    sceneObjects_[1].meshData = renderer::parametric_model::PrimitiveFactory::makeCylinder(0.55F, 1.35F, 32U);
+    sceneObjects_[1].primitiveDescriptor = kDefaultPrimitiveDescriptors[1];
+    sceneObjects_[1].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[1].primitiveDescriptor);
     sceneObjects_[1].materialData.baseColor = kDefaultSceneObjects[1].color;
     sceneObjects_[1].offsetX = kDefaultSceneObjects[1].offsetX;
     sceneObjects_[1].offsetY = kDefaultSceneObjects[1].offsetY;
@@ -348,7 +398,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     sceneObjects_[1].rotationSpeed = kDefaultSceneObjects[1].rotationSpeed;
     sceneObjects_[1].visible = kDefaultSceneObjects[1].visible;
 
-    sceneObjects_[2].meshData = renderer::parametric_model::PrimitiveFactory::makeSphere(0.7F, 28U, 18U);
+    sceneObjects_[2].primitiveDescriptor = kDefaultPrimitiveDescriptors[2];
+    sceneObjects_[2].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[2].primitiveDescriptor);
     sceneObjects_[2].materialData.baseColor = kDefaultSceneObjects[2].color;
     sceneObjects_[2].offsetX = kDefaultSceneObjects[2].offsetX;
     sceneObjects_[2].offsetY = kDefaultSceneObjects[2].offsetY;
@@ -391,6 +442,8 @@ void ViewerWindow::Viewport::resetDefaults() {
         const auto& defaults = kDefaultSceneObjects[index];
         auto& sceneObject = sceneObjects_[index];
 
+        sceneObject.primitiveDescriptor = kDefaultPrimitiveDescriptors[index];
+        rebuildObjectMesh(index);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
         sceneObject.offsetY = defaults.offsetY;
@@ -421,6 +474,8 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
         auto& sceneObject = sceneObjects_[index];
         const auto& defaults = kDefaultSceneObjects[index];
 
+        sceneObject.primitiveDescriptor = kDefaultPrimitiveDescriptors[index];
+        rebuildObjectMesh(index);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
         sceneObject.offsetY = defaults.offsetY;
@@ -602,6 +657,85 @@ float ViewerWindow::Viewport::orthographicHeight() const {
     return cameraController_.orthographicHeight();
 }
 
+void ViewerWindow::Viewport::setBoxWidth(float width) {
+    auto descriptor = sceneObjects_[0].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.box.width = width;
+    applyPrimitiveDescriptor(0, descriptor);
+}
+
+float ViewerWindow::Viewport::boxWidth() const {
+    return sceneObjects_[0].primitiveDescriptor.box.width;
+}
+
+void ViewerWindow::Viewport::setBoxHeight(float height) {
+    auto descriptor = sceneObjects_[0].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.box.height = height;
+    applyPrimitiveDescriptor(0, descriptor);
+}
+
+void ViewerWindow::Viewport::setBoxDepth(float depth) {
+    auto descriptor = sceneObjects_[0].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.box.depth = depth;
+    applyPrimitiveDescriptor(0, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderRadius(float radius) {
+    auto descriptor = sceneObjects_[1].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.cylinder.radius = radius;
+    applyPrimitiveDescriptor(1, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderHeight(float height) {
+    auto descriptor = sceneObjects_[1].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.cylinder.height = height;
+    applyPrimitiveDescriptor(1, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderSegments(std::uint32_t segments) {
+    auto descriptor = sceneObjects_[1].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.cylinder.segments = segments;
+    applyPrimitiveDescriptor(1, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereRadius(float radius) {
+    auto descriptor = sceneObjects_[2].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.sphere.radius = radius;
+    applyPrimitiveDescriptor(2, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereSlices(std::uint32_t slices) {
+    auto descriptor = sceneObjects_[2].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.sphere.slices = slices;
+    applyPrimitiveDescriptor(2, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereStacks(std::uint32_t stacks) {
+    auto descriptor = sceneObjects_[2].primitiveDescriptor;
+    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.sphere.stacks = stacks;
+    applyPrimitiveDescriptor(2, descriptor);
+}
+
+renderer::parametric_model::BoxSpec ViewerWindow::Viewport::boxSpec() const {
+    return sceneObjects_[0].primitiveDescriptor.box;
+}
+
+renderer::parametric_model::CylinderSpec ViewerWindow::Viewport::cylinderSpec() const {
+    return sceneObjects_[1].primitiveDescriptor.cylinder;
+}
+
+renderer::parametric_model::SphereSpec ViewerWindow::Viewport::sphereSpec() const {
+    return sceneObjects_[2].primitiveDescriptor.sphere;
+}
+
 float ViewerWindow::Viewport::nearPlane() const {
     return cameraController_.nearPlane();
 }
@@ -639,6 +773,9 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
     state.camera = cameraPanelState();
     state.modelChangeViewStrategy =
         modelChangeViewStrategy() == model_change_view::ViewStrategy::auto_frame ? 1 : 0;
+    state.box = boxSpec();
+    state.cylinder = cylinderSpec();
+    state.sphere = sphereSpec();
     return state;
 }
 
@@ -1054,6 +1191,53 @@ void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aa
     viewport_zoom::reset(viewportZoomState_);
     refreshViewportZoomState();
     notifyCameraStateChanged();
+}
+
+void ViewerWindow::Viewport::applyPrimitiveDescriptor(
+    int index,
+    const renderer::parametric_model::PrimitiveDescriptor& descriptor)
+{
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    sceneObjects_[index].primitiveDescriptor = descriptor;
+    rebuildObjectMesh(index);
+    markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
+    processPendingModelChange();
+    update();
+}
+
+void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto& sceneObject = sceneObjects_[index];
+    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.primitiveDescriptor);
+
+    if (renderer_.isInitialized()) {
+        bool meshReady = false;
+        if (sceneObject.meshHandle != renderer::scene_contract::kInvalidMeshHandle) {
+            meshReady = renderer_.updateMesh(sceneObject.meshHandle, sceneObject.meshData);
+            if (!meshReady) {
+                qWarning() << "Failed to update scene mesh, retrying upload:" << QString::fromStdString(renderer_.lastError());
+                renderer_.releaseMesh(sceneObject.meshHandle);
+                sceneObject.meshHandle = renderer::scene_contract::kInvalidMeshHandle;
+            }
+        }
+
+        if (!meshReady) {
+            sceneObject.meshHandle = renderer_.uploadMesh(sceneObject.meshData);
+            if (sceneObject.meshHandle == renderer::scene_contract::kInvalidMeshHandle) {
+                qWarning() << "Failed to upload rebuilt scene mesh:" << QString::fromStdString(renderer_.lastError());
+            } else {
+                repository_.updateMeshHandle(sceneObject.itemId, sceneObject.meshHandle);
+            }
+        }
+    }
+
+    repository_.updateLocalBounds(sceneObject.itemId, sceneObject.meshData.localBounds);
 }
 
 void ViewerWindow::Viewport::updateSceneTransforms() {

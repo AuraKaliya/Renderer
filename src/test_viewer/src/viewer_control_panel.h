@@ -9,6 +9,7 @@ class QLabel;
 #include "camera_control_widget.h"
 #include "lighting_control_widget.h"
 #include "scene_object_control_widget.h"
+#include "renderer/parametric_model/primitive_factory.h"
 #include "renderer/scene_contract/types.h"
 
 class ViewerControlPanel final : public QWidget {
@@ -45,6 +46,9 @@ public:
         LightingPanelState lighting {};
         CameraPanelState camera {};
         int modelChangeViewStrategy = 0;
+        renderer::parametric_model::BoxSpec box {};
+        renderer::parametric_model::CylinderSpec cylinder {};
+        renderer::parametric_model::SphereSpec sphere {};
     };
 
     explicit ViewerControlPanel(QWidget* parent = nullptr);
@@ -67,6 +71,15 @@ signals:
     void resetDefaultsRequested();
     void focusSphereRequested();
     void modelChangeViewStrategyChanged(int strategy);
+    void boxWidthChanged(float width);
+    void boxHeightChanged(float height);
+    void boxDepthChanged(float depth);
+    void cylinderRadiusChanged(float radius);
+    void cylinderHeightChanged(float height);
+    void cylinderSegmentsChanged(int segments);
+    void sphereRadiusChanged(float radius);
+    void sphereSlicesChanged(int slices);
+    void sphereStacksChanged(int stacks);
 
 private:
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
@@ -79,4 +92,13 @@ private:
     LightingControlWidget* lightingWidget_ = nullptr;
     CameraControlWidget* cameraWidget_ = nullptr;
     class QComboBox* modelChangeViewStrategyComboBox_ = nullptr;
+    class QDoubleSpinBox* boxWidthSpinBox_ = nullptr;
+    class QDoubleSpinBox* boxHeightSpinBox_ = nullptr;
+    class QDoubleSpinBox* boxDepthSpinBox_ = nullptr;
+    class QDoubleSpinBox* cylinderRadiusSpinBox_ = nullptr;
+    class QDoubleSpinBox* cylinderHeightSpinBox_ = nullptr;
+    class QSpinBox* cylinderSegmentsSpinBox_ = nullptr;
+    class QDoubleSpinBox* sphereRadiusSpinBox_ = nullptr;
+    class QSpinBox* sphereSlicesSpinBox_ = nullptr;
+    class QSpinBox* sphereStacksSpinBox_ = nullptr;
 };

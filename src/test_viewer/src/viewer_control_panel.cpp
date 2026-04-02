@@ -4,6 +4,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
@@ -114,6 +116,75 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
                 modelChangeViewStrategyComboBox_->itemData(index).toInt());
         });
 
+    boxWidthSpinBox_ = new QDoubleSpinBox(actionGroup);
+    boxWidthSpinBox_->setRange(0.05, 10.0);
+    boxWidthSpinBox_->setSingleStep(0.05);
+    boxWidthSpinBox_->setDecimals(2);
+    connect(boxWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit boxWidthChanged(static_cast<float>(value));
+    });
+
+    boxHeightSpinBox_ = new QDoubleSpinBox(actionGroup);
+    boxHeightSpinBox_->setRange(0.05, 10.0);
+    boxHeightSpinBox_->setSingleStep(0.05);
+    boxHeightSpinBox_->setDecimals(2);
+    connect(boxHeightSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit boxHeightChanged(static_cast<float>(value));
+    });
+
+    boxDepthSpinBox_ = new QDoubleSpinBox(actionGroup);
+    boxDepthSpinBox_->setRange(0.05, 10.0);
+    boxDepthSpinBox_->setSingleStep(0.05);
+    boxDepthSpinBox_->setDecimals(2);
+    connect(boxDepthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit boxDepthChanged(static_cast<float>(value));
+    });
+
+    cylinderRadiusSpinBox_ = new QDoubleSpinBox(actionGroup);
+    cylinderRadiusSpinBox_->setRange(0.05, 10.0);
+    cylinderRadiusSpinBox_->setSingleStep(0.05);
+    cylinderRadiusSpinBox_->setDecimals(2);
+    connect(cylinderRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit cylinderRadiusChanged(static_cast<float>(value));
+    });
+
+    cylinderHeightSpinBox_ = new QDoubleSpinBox(actionGroup);
+    cylinderHeightSpinBox_->setRange(0.05, 10.0);
+    cylinderHeightSpinBox_->setSingleStep(0.05);
+    cylinderHeightSpinBox_->setDecimals(2);
+    connect(cylinderHeightSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit cylinderHeightChanged(static_cast<float>(value));
+    });
+
+    cylinderSegmentsSpinBox_ = new QSpinBox(actionGroup);
+    cylinderSegmentsSpinBox_->setRange(3, 128);
+    cylinderSegmentsSpinBox_->setSingleStep(1);
+    connect(cylinderSegmentsSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+        emit cylinderSegmentsChanged(value);
+    });
+
+    sphereRadiusSpinBox_ = new QDoubleSpinBox(actionGroup);
+    sphereRadiusSpinBox_->setRange(0.05, 10.0);
+    sphereRadiusSpinBox_->setSingleStep(0.05);
+    sphereRadiusSpinBox_->setDecimals(2);
+    connect(sphereRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        emit sphereRadiusChanged(static_cast<float>(value));
+    });
+
+    sphereSlicesSpinBox_ = new QSpinBox(actionGroup);
+    sphereSlicesSpinBox_->setRange(3, 128);
+    sphereSlicesSpinBox_->setSingleStep(1);
+    connect(sphereSlicesSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+        emit sphereSlicesChanged(value);
+    });
+
+    sphereStacksSpinBox_ = new QSpinBox(actionGroup);
+    sphereStacksSpinBox_->setRange(2, 128);
+    sphereStacksSpinBox_->setSingleStep(1);
+    connect(sphereStacksSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+        emit sphereStacksChanged(value);
+    });
+
     auto* boundsGroup = new QGroupBox("Bounds", contentWidget);
     auto* boundsLayout = new QVBoxLayout(boundsGroup);
     for (int index = 0; index < kSceneObjectCount; ++index) {
@@ -141,6 +212,24 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     actionLayout->addWidget(new QLabel("Model Change View", actionGroup));
     actionLayout->addWidget(modelChangeViewStrategyComboBox_);
+    actionLayout->addWidget(new QLabel("Box Width", actionGroup));
+    actionLayout->addWidget(boxWidthSpinBox_);
+    actionLayout->addWidget(new QLabel("Box Height", actionGroup));
+    actionLayout->addWidget(boxHeightSpinBox_);
+    actionLayout->addWidget(new QLabel("Box Depth", actionGroup));
+    actionLayout->addWidget(boxDepthSpinBox_);
+    actionLayout->addWidget(new QLabel("Cylinder Radius", actionGroup));
+    actionLayout->addWidget(cylinderRadiusSpinBox_);
+    actionLayout->addWidget(new QLabel("Cylinder Height", actionGroup));
+    actionLayout->addWidget(cylinderHeightSpinBox_);
+    actionLayout->addWidget(new QLabel("Cylinder Segments", actionGroup));
+    actionLayout->addWidget(cylinderSegmentsSpinBox_);
+    actionLayout->addWidget(new QLabel("Sphere Radius", actionGroup));
+    actionLayout->addWidget(sphereRadiusSpinBox_);
+    actionLayout->addWidget(new QLabel("Sphere Slices", actionGroup));
+    actionLayout->addWidget(sphereSlicesSpinBox_);
+    actionLayout->addWidget(new QLabel("Sphere Stacks", actionGroup));
+    actionLayout->addWidget(sphereStacksSpinBox_);
     actionLayout->addWidget(resetButton);
     actionLayout->addWidget(sphereFocusButton);
     actionLayout->addWidget(focusAllButton);
@@ -167,6 +256,42 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
         if (comboIndex >= 0) {
             modelChangeViewStrategyComboBox_->setCurrentIndex(comboIndex);
         }
+    }
+    if (boxWidthSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(boxWidthSpinBox_);
+        boxWidthSpinBox_->setValue(state.box.width);
+    }
+    if (boxHeightSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(boxHeightSpinBox_);
+        boxHeightSpinBox_->setValue(state.box.height);
+    }
+    if (boxDepthSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(boxDepthSpinBox_);
+        boxDepthSpinBox_->setValue(state.box.depth);
+    }
+    if (cylinderRadiusSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(cylinderRadiusSpinBox_);
+        cylinderRadiusSpinBox_->setValue(state.cylinder.radius);
+    }
+    if (cylinderHeightSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(cylinderHeightSpinBox_);
+        cylinderHeightSpinBox_->setValue(state.cylinder.height);
+    }
+    if (cylinderSegmentsSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(cylinderSegmentsSpinBox_);
+        cylinderSegmentsSpinBox_->setValue(static_cast<int>(state.cylinder.segments));
+    }
+    if (sphereRadiusSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(sphereRadiusSpinBox_);
+        sphereRadiusSpinBox_->setValue(state.sphere.radius);
+    }
+    if (sphereSlicesSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(sphereSlicesSpinBox_);
+        sphereSlicesSpinBox_->setValue(static_cast<int>(state.sphere.slices));
+    }
+    if (sphereStacksSpinBox_ != nullptr) {
+        const QSignalBlocker blocker(sphereStacksSpinBox_);
+        sphereStacksSpinBox_->setValue(static_cast<int>(state.sphere.stacks));
     }
 }
 
