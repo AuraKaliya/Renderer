@@ -34,6 +34,8 @@ public:
         float rotationSpeed = 0.0F;
         renderer::scene_contract::ColorRgba color {};
         renderer::scene_contract::Aabb bounds {};
+        SceneObjectControlWidget::MirrorState mirror {};
+        SceneObjectControlWidget::LinearArrayState linearArray {};
     };
 
     struct LightingPanelState {
@@ -59,6 +61,12 @@ signals:
     void objectVisibleChanged(int index, bool visible);
     void objectRotationSpeedChanged(int index, float speed);
     void objectColorChanged(int index, float red, float green, float blue);
+    void objectMirrorEnabledChanged(int index, bool enabled);
+    void objectMirrorAxisChanged(int index, int axis);
+    void objectMirrorPlaneOffsetChanged(int index, float planeOffset);
+    void objectLinearArrayEnabledChanged(int index, bool enabled);
+    void objectLinearArrayCountChanged(int index, int count);
+    void objectLinearArrayOffsetChanged(int index, float x, float y, float z);
     void ambientStrengthChanged(float strength);
     void lightDirectionChanged(float x, float y, float z);
     void projectionModeChanged(int mode);
@@ -83,6 +91,10 @@ signals:
 
 private:
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
+    void setObjectOperatorState(
+        int index,
+        const SceneObjectControlWidget::MirrorState& mirror,
+        const SceneObjectControlWidget::LinearArrayState& linearArray);
     void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(const CameraPanelState& state);

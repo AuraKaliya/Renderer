@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "renderer/scene_contract/types.h"
 
@@ -37,6 +38,39 @@ struct PrimitiveDescriptor {
     SphereSpec sphere {};
 };
 
+enum class OperatorKind : std::uint8_t {
+    mirror,
+    linear_array
+};
+
+enum class Axis : std::uint8_t {
+    x,
+    y,
+    z
+};
+
+struct MirrorOperatorSpec {
+    Axis axis = Axis::x;
+    float planeOffset = 0.0F;
+};
+
+struct LinearArrayOperatorSpec {
+    std::uint32_t count = 1U;
+    scene_contract::Vec3f offset {1.0F, 0.0F, 0.0F};
+};
+
+struct OperatorDescriptor {
+    OperatorKind kind = OperatorKind::mirror;
+    bool enabled = false;
+    MirrorOperatorSpec mirror {};
+    LinearArrayOperatorSpec linearArray {};
+};
+
+struct ParametricObjectDescriptor {
+    PrimitiveDescriptor basePrimitive {};
+    std::vector<OperatorDescriptor> operators;
+};
+
 class PrimitiveFactory {
 public:
     [[nodiscard]] static PrimitiveDescriptor makeBoxDescriptor(
@@ -54,7 +88,11 @@ public:
         std::uint32_t slices = 24U,
         std::uint32_t stacks = 16U);
 
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricObject(
+        const PrimitiveDescriptor& basePrimitive);
+
     [[nodiscard]] static scene_contract::MeshData build(const PrimitiveDescriptor& descriptor);
+    [[nodiscard]] static scene_contract::MeshData build(const ParametricObjectDescriptor& descriptor);
 
     [[nodiscard]] static scene_contract::MeshData makeBox(
         float width,

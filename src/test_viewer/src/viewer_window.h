@@ -82,6 +82,12 @@ private:
         void setSphereRadius(float radius);
         void setSphereSlices(std::uint32_t slices);
         void setSphereStacks(std::uint32_t stacks);
+        void setObjectMirrorEnabled(int index, bool enabled);
+        void setObjectMirrorAxis(int index, renderer::parametric_model::Axis axis);
+        void setObjectMirrorPlaneOffset(int index, float planeOffset);
+        void setObjectLinearArrayEnabled(int index, bool enabled);
+        void setObjectLinearArrayCount(int index, std::uint32_t count);
+        void setObjectLinearArrayOffset(int index, const renderer::scene_contract::Vec3f& offset);
         [[nodiscard]] renderer::parametric_model::BoxSpec boxSpec() const;
         [[nodiscard]] renderer::parametric_model::CylinderSpec cylinderSpec() const;
         [[nodiscard]] renderer::parametric_model::SphereSpec sphereSpec() const;
@@ -117,9 +123,17 @@ private:
         void notifyCameraStateChanged();
         void refreshViewportZoomState();
         void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
-        void applyPrimitiveDescriptor(int index, const renderer::parametric_model::PrimitiveDescriptor& descriptor);
+        void applyParametricObjectDescriptor(
+            int index,
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor);
         void rebuildObjectMesh(int index);
         void updateSceneTransforms();
+        renderer::parametric_model::OperatorDescriptor* ensureObjectOperator(
+            renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::OperatorKind kind);
+        [[nodiscard]] const renderer::parametric_model::OperatorDescriptor* findObjectOperator(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::OperatorKind kind) const;
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleSceneWorldBounds() const;
@@ -130,7 +144,7 @@ private:
             renderer::scene_contract::MeshHandle meshHandle = renderer::scene_contract::kInvalidMeshHandle;
             renderer::scene_contract::MaterialHandle materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
             renderer::scene_contract::TextureHandle textureHandle = renderer::scene_contract::kInvalidTextureHandle;
-            renderer::parametric_model::PrimitiveDescriptor primitiveDescriptor {};
+            renderer::parametric_model::ParametricObjectDescriptor parametricObjectDescriptor {};
             renderer::scene_contract::MeshData meshData;
             renderer::scene_contract::TextureData textureData;
             renderer::scene_contract::MaterialData materialData;

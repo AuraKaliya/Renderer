@@ -69,6 +69,24 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         connect(objectWidget, &SceneObjectControlWidget::colorChanged, this, [this, index](float red, float green, float blue) {
             emit objectColorChanged(index, red, green, blue);
         });
+        connect(objectWidget, &SceneObjectControlWidget::mirrorEnabledChanged, this, [this, index](bool enabled) {
+            emit objectMirrorEnabledChanged(index, enabled);
+        });
+        connect(objectWidget, &SceneObjectControlWidget::mirrorAxisChanged, this, [this, index](int axis) {
+            emit objectMirrorAxisChanged(index, axis);
+        });
+        connect(objectWidget, &SceneObjectControlWidget::mirrorPlaneOffsetChanged, this, [this, index](float planeOffset) {
+            emit objectMirrorPlaneOffsetChanged(index, planeOffset);
+        });
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayEnabledChanged, this, [this, index](bool enabled) {
+            emit objectLinearArrayEnabledChanged(index, enabled);
+        });
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayCountChanged, this, [this, index](int count) {
+            emit objectLinearArrayCountChanged(index, count);
+        });
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayOffsetChanged, this, [this, index](float x, float y, float z) {
+            emit objectLinearArrayOffsetChanged(index, x, y, z);
+        });
         objectWidgets_[index] = objectWidget;
         contentLayout->addWidget(objectWidget);
     }
@@ -245,6 +263,7 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
     for (int index = 0; index < kSceneObjectCount; ++index) {
         const auto& object = state.objects[index];
         setObjectState(index, object.visible, object.rotationSpeed, object.color);
+        setObjectOperatorState(index, object.mirror, object.linearArray);
         setObjectBounds(index, object.bounds);
     }
 
@@ -305,6 +324,18 @@ void ViewerControlPanel::setObjectState(
         return;
     }
     objectWidgets_[index]->setObjectState(visible, rotationSpeed, color);
+}
+
+void ViewerControlPanel::setObjectOperatorState(
+    int index,
+    const SceneObjectControlWidget::MirrorState& mirror,
+    const SceneObjectControlWidget::LinearArrayState& linearArray)
+{
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    objectWidgets_[index]->setOperatorState(mirror, linearArray);
 }
 
 void ViewerControlPanel::setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds) {

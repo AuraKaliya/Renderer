@@ -91,6 +91,116 @@ scene_contract::Aabb computeBoundsFromVertices(const std::vector<scene_contract:
     return bounds;
 }
 
+scene_contract::Vec3f addVec3(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    return {
+        left.x + right.x,
+        left.y + right.y,
+        left.z + right.z
+    };
+}
+
+scene_contract::Vec3f mirrorPosition(
+    const scene_contract::Vec3f& value,
+    Axis axis,
+    float planeOffset)
+{
+    auto mirrored = value;
+    switch (axis) {
+    case Axis::x:
+        mirrored.x = 2.0F * planeOffset - mirrored.x;
+        break;
+    case Axis::y:
+        mirrored.y = 2.0F * planeOffset - mirrored.y;
+        break;
+    case Axis::z:
+        mirrored.z = 2.0F * planeOffset - mirrored.z;
+        break;
+    }
+    return mirrored;
+}
+
+scene_contract::Vec3f mirrorNormal(
+    const scene_contract::Vec3f& value,
+    Axis axis)
+{
+    auto mirrored = value;
+    switch (axis) {
+    case Axis::x:
+        mirrored.x = -mirrored.x;
+        break;
+    case Axis::y:
+        mirrored.y = -mirrored.y;
+        break;
+    case Axis::z:
+        mirrored.z = -mirrored.z;
+        break;
+    }
+    return mirrored;
+}
+
+scene_contract::MeshData applyMirror(
+    const scene_contract::MeshData& source,
+    const MirrorOperatorSpec& spec)
+{
+    scene_contract::MeshData mesh = source;
+    const std::uint32_t baseVertexCount = static_cast<std::uint32_t>(source.vertices.size());
+    const std::uint32_t baseIndexCount = static_cast<std::uint32_t>(source.indices.size());
+
+    mesh.vertices.reserve(source.vertices.size() * 2U);
+    mesh.indices.reserve(source.indices.size() * 2U);
+
+    for (const auto& vertex : source.vertices) {
+        auto mirrored = vertex;
+        mirrored.position = mirrorPosition(vertex.position, spec.axis, spec.planeOffset);
+        mirrored.normal = mirrorNormal(vertex.normal, spec.axis);
+        mesh.vertices.push_back(mirrored);
+    }
+
+    for (std::uint32_t index = 0; index + 2U < baseIndexCount; index += 3U) {
+        mesh.indices.push_back(baseVertexCount + source.indices[index]);
+        mesh.indices.push_back(baseVertexCount + source.indices[index + 2U]);
+        mesh.indices.push_back(baseVertexCount + source.indices[index + 1U]);
+    }
+
+    mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
+    return mesh;
+}
+
+scene_contract::MeshData applyLinearArray(
+    const scene_contract::MeshData& source,
+    const LinearArrayOperatorSpec& spec)
+{
+    scene_contract::MeshData mesh;
+    const std::uint32_t count = spec.count > 0U ? spec.count : 1U;
+    mesh.vertices.reserve(source.vertices.size() * count);
+    mesh.indices.reserve(source.indices.size() * count);
+
+    for (std::uint32_t instance = 0; instance < count; ++instance) {
+        const scene_contract::Vec3f instanceOffset = {
+            spec.offset.x * static_cast<float>(instance),
+            spec.offset.y * static_cast<float>(instance),
+            spec.offset.z * static_cast<float>(instance)
+        };
+        const std::uint32_t baseVertex = static_cast<std::uint32_t>(mesh.vertices.size());
+
+        for (const auto& vertex : source.vertices) {
+            auto translated = vertex;
+            translated.position = addVec3(vertex.position, instanceOffset);
+            mesh.vertices.push_back(translated);
+        }
+
+        for (const auto index : source.indices) {
+            mesh.indices.push_back(baseVertex + index);
+        }
+    }
+
+    mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
+    return mesh;
+}
+
 float clampDimension(float value) {
     return value > kMinimumDimension ? value : kMinimumDimension;
 }
@@ -118,6 +228,13 @@ SphereSpec normalizeSphereSpec(SphereSpec spec) {
     }
     if (spec.stacks < kMinimumSphereStacks) {
         spec.stacks = kMinimumSphereStacks;
+    }
+    return spec;
+}
+
+LinearArrayOperatorSpec normalizeLinearArraySpec(LinearArrayOperatorSpec spec) {
+    if (spec.count < 1U) {
+        spec.count = 1U;
     }
     return spec;
 }
@@ -307,6 +424,14 @@ PrimitiveDescriptor PrimitiveFactory::makeSphereDescriptor(
     return descriptor;
 }
 
+ParametricObjectDescriptor PrimitiveFactory::makeParametricObject(
+    const PrimitiveDescriptor& basePrimitive)
+{
+    ParametricObjectDescriptor descriptor;
+    descriptor.basePrimitive = basePrimitive;
+    return descriptor;
+}
+
 scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& descriptor) {
     switch (descriptor.kind) {
     case PrimitiveKind::box:
@@ -318,6 +443,30 @@ scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& desc
     }
 
     return {};
+}
+
+scene_contract::MeshData PrimitiveFactory::build(const ParametricObjectDescriptor& descriptor) {
+    scene_contract::MeshData mesh = build(descriptor.basePrimitive);
+
+    for (const auto& operatorDescriptor : descriptor.operators) {
+        if (!operatorDescriptor.enabled) {
+            continue;
+        }
+
+        switch (operatorDescriptor.kind) {
+        case OperatorKind::mirror:
+            mesh = applyMirror(mesh, operatorDescriptor.mirror);
+            break;
+        case OperatorKind::linear_array:
+            mesh = applyLinearArray(mesh, normalizeLinearArraySpec(operatorDescriptor.linearArray));
+            break;
+        }
+    }
+
+    if (!mesh.vertices.empty()) {
+        mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
+    }
+    return mesh;
 }
 
 scene_contract::MeshData PrimitiveFactory::makeBox(

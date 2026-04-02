@@ -38,25 +38,51 @@ const std::array<SceneObjectDefaults, kSceneObjectCount> kDefaultSceneObjects = 
     {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 1.25F, true}
 }};
 
-const std::array<renderer::parametric_model::PrimitiveDescriptor, kSceneObjectCount> kDefaultPrimitiveDescriptors = {{
-    {
+renderer::parametric_model::OperatorDescriptor makeMirrorOperatorDescriptor() {
+    renderer::parametric_model::OperatorDescriptor descriptor;
+    descriptor.kind = renderer::parametric_model::OperatorKind::mirror;
+    descriptor.enabled = false;
+    descriptor.mirror.axis = renderer::parametric_model::Axis::x;
+    return descriptor;
+}
+
+renderer::parametric_model::OperatorDescriptor makeLinearArrayOperatorDescriptor() {
+    renderer::parametric_model::OperatorDescriptor descriptor;
+    descriptor.kind = renderer::parametric_model::OperatorKind::linear_array;
+    descriptor.enabled = false;
+    descriptor.linearArray.count = 1U;
+    descriptor.linearArray.offset = {1.0F, 0.0F, 0.0F};
+    return descriptor;
+}
+
+renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObject(
+    const renderer::parametric_model::PrimitiveDescriptor& basePrimitive)
+{
+    auto descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricObject(basePrimitive);
+    descriptor.operators.push_back(makeMirrorOperatorDescriptor());
+    descriptor.operators.push_back(makeLinearArrayOperatorDescriptor());
+    return descriptor;
+}
+
+const std::array<renderer::parametric_model::ParametricObjectDescriptor, kSceneObjectCount> kDefaultParametricObjects = {{
+    makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::box,
         {1.0F, 1.0F, 1.0F},
         {},
         {}
-    },
-    {
+    }),
+    makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::cylinder,
         {},
         {0.55F, 1.35F, 32U},
         {}
-    },
-    {
+    }),
+    makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::sphere,
         {},
         {},
         {0.7F, 28U, 18U}
-    }
+    })
 }};
 
 const renderer::scene_contract::DirectionalLightData kDefaultLight = {
@@ -294,6 +320,24 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::objectColorChanged, this, [this](int index, float red, float green, float blue) {
         viewport_->setObjectColor(index, makeColorFromRgbSpin(red, green, blue));
     });
+    connect(controlPanel_, &ViewerControlPanel::objectMirrorEnabledChanged, this, [this](int index, bool enabled) {
+        viewport_->setObjectMirrorEnabled(index, enabled);
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectMirrorAxisChanged, this, [this](int index, int axis) {
+        viewport_->setObjectMirrorAxis(index, static_cast<renderer::parametric_model::Axis>(axis));
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectMirrorPlaneOffsetChanged, this, [this](int index, float planeOffset) {
+        viewport_->setObjectMirrorPlaneOffset(index, planeOffset);
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectLinearArrayEnabledChanged, this, [this](int index, bool enabled) {
+        viewport_->setObjectLinearArrayEnabled(index, enabled);
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectLinearArrayCountChanged, this, [this](int index, int count) {
+        viewport_->setObjectLinearArrayCount(index, static_cast<std::uint32_t>(count));
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectLinearArrayOffsetChanged, this, [this](int index, float x, float y, float z) {
+        viewport_->setObjectLinearArrayOffset(index, {x, y, z});
+    });
     connect(controlPanel_, &ViewerControlPanel::ambientStrengthChanged, this, [this](float strength) {
         viewport_->setAmbientStrength(strength);
     });
@@ -376,8 +420,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     setFormat(makeFormat());
     setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
-    sceneObjects_[0].primitiveDescriptor = kDefaultPrimitiveDescriptors[0];
-    sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[0].primitiveDescriptor);
+    sceneObjects_[0].parametricObjectDescriptor = kDefaultParametricObjects[0];
+    sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[0].parametricObjectDescriptor);
     sceneObjects_[0].textureData = makeCheckerTextureData(64, 64, 8U);
     sceneObjects_[0].materialData.baseColor = kDefaultSceneObjects[0].color;
     sceneObjects_[0].materialData.useBaseColorTexture = true;
@@ -388,8 +432,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     sceneObjects_[0].rotationSpeed = kDefaultSceneObjects[0].rotationSpeed;
     sceneObjects_[0].visible = kDefaultSceneObjects[0].visible;
 
-    sceneObjects_[1].primitiveDescriptor = kDefaultPrimitiveDescriptors[1];
-    sceneObjects_[1].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[1].primitiveDescriptor);
+    sceneObjects_[1].parametricObjectDescriptor = kDefaultParametricObjects[1];
+    sceneObjects_[1].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[1].parametricObjectDescriptor);
     sceneObjects_[1].materialData.baseColor = kDefaultSceneObjects[1].color;
     sceneObjects_[1].offsetX = kDefaultSceneObjects[1].offsetX;
     sceneObjects_[1].offsetY = kDefaultSceneObjects[1].offsetY;
@@ -398,8 +442,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     sceneObjects_[1].rotationSpeed = kDefaultSceneObjects[1].rotationSpeed;
     sceneObjects_[1].visible = kDefaultSceneObjects[1].visible;
 
-    sceneObjects_[2].primitiveDescriptor = kDefaultPrimitiveDescriptors[2];
-    sceneObjects_[2].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[2].primitiveDescriptor);
+    sceneObjects_[2].parametricObjectDescriptor = kDefaultParametricObjects[2];
+    sceneObjects_[2].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[2].parametricObjectDescriptor);
     sceneObjects_[2].materialData.baseColor = kDefaultSceneObjects[2].color;
     sceneObjects_[2].offsetX = kDefaultSceneObjects[2].offsetX;
     sceneObjects_[2].offsetY = kDefaultSceneObjects[2].offsetY;
@@ -442,7 +486,7 @@ void ViewerWindow::Viewport::resetDefaults() {
         const auto& defaults = kDefaultSceneObjects[index];
         auto& sceneObject = sceneObjects_[index];
 
-        sceneObject.primitiveDescriptor = kDefaultPrimitiveDescriptors[index];
+        sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
         rebuildObjectMesh(index);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
@@ -474,7 +518,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
         auto& sceneObject = sceneObjects_[index];
         const auto& defaults = kDefaultSceneObjects[index];
 
-        sceneObject.primitiveDescriptor = kDefaultPrimitiveDescriptors[index];
+        sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
         rebuildObjectMesh(index);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
@@ -658,82 +702,175 @@ float ViewerWindow::Viewport::orthographicHeight() const {
 }
 
 void ViewerWindow::Viewport::setBoxWidth(float width) {
-    auto descriptor = sceneObjects_[0].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.box.width = width;
-    applyPrimitiveDescriptor(0, descriptor);
+    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.basePrimitive.box.width = width;
+    applyParametricObjectDescriptor(0, descriptor);
 }
 
 float ViewerWindow::Viewport::boxWidth() const {
-    return sceneObjects_[0].primitiveDescriptor.box.width;
+    return sceneObjects_[0].parametricObjectDescriptor.basePrimitive.box.width;
 }
 
 void ViewerWindow::Viewport::setBoxHeight(float height) {
-    auto descriptor = sceneObjects_[0].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.box.height = height;
-    applyPrimitiveDescriptor(0, descriptor);
+    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.basePrimitive.box.height = height;
+    applyParametricObjectDescriptor(0, descriptor);
 }
 
 void ViewerWindow::Viewport::setBoxDepth(float depth) {
-    auto descriptor = sceneObjects_[0].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.box.depth = depth;
-    applyPrimitiveDescriptor(0, descriptor);
+    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
+    descriptor.basePrimitive.box.depth = depth;
+    applyParametricObjectDescriptor(0, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderRadius(float radius) {
-    auto descriptor = sceneObjects_[1].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.cylinder.radius = radius;
-    applyPrimitiveDescriptor(1, descriptor);
+    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.basePrimitive.cylinder.radius = radius;
+    applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderHeight(float height) {
-    auto descriptor = sceneObjects_[1].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.cylinder.height = height;
-    applyPrimitiveDescriptor(1, descriptor);
+    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.basePrimitive.cylinder.height = height;
+    applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderSegments(std::uint32_t segments) {
-    auto descriptor = sceneObjects_[1].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.cylinder.segments = segments;
-    applyPrimitiveDescriptor(1, descriptor);
+    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    descriptor.basePrimitive.cylinder.segments = segments;
+    applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereRadius(float radius) {
-    auto descriptor = sceneObjects_[2].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.sphere.radius = radius;
-    applyPrimitiveDescriptor(2, descriptor);
+    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.basePrimitive.sphere.radius = radius;
+    applyParametricObjectDescriptor(2, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereSlices(std::uint32_t slices) {
-    auto descriptor = sceneObjects_[2].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.sphere.slices = slices;
-    applyPrimitiveDescriptor(2, descriptor);
+    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.basePrimitive.sphere.slices = slices;
+    applyParametricObjectDescriptor(2, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereStacks(std::uint32_t stacks) {
-    auto descriptor = sceneObjects_[2].primitiveDescriptor;
-    descriptor.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.sphere.stacks = stacks;
-    applyPrimitiveDescriptor(2, descriptor);
+    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
+    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
+    descriptor.basePrimitive.sphere.stacks = stacks;
+    applyParametricObjectDescriptor(2, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
+    if (mirrorOperator == nullptr) {
+        return;
+    }
+
+    mirrorOperator->enabled = enabled;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectMirrorAxis(int index, renderer::parametric_model::Axis axis) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
+    if (mirrorOperator == nullptr) {
+        return;
+    }
+
+    mirrorOperator->mirror.axis = axis;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectMirrorPlaneOffset(int index, float planeOffset) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
+    if (mirrorOperator == nullptr) {
+        return;
+    }
+
+    mirrorOperator->mirror.planeOffset = planeOffset;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectLinearArrayEnabled(int index, bool enabled) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
+    if (linearArrayOperator == nullptr) {
+        return;
+    }
+
+    linearArrayOperator->enabled = enabled;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectLinearArrayCount(int index, std::uint32_t count) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
+    if (linearArrayOperator == nullptr) {
+        return;
+    }
+
+    linearArrayOperator->linearArray.count = count;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setObjectLinearArrayOffset(
+    int index,
+    const renderer::scene_contract::Vec3f& offset)
+{
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
+    if (linearArrayOperator == nullptr) {
+        return;
+    }
+
+    linearArrayOperator->linearArray.offset = offset;
+    applyParametricObjectDescriptor(index, descriptor);
 }
 
 renderer::parametric_model::BoxSpec ViewerWindow::Viewport::boxSpec() const {
-    return sceneObjects_[0].primitiveDescriptor.box;
+    return sceneObjects_[0].parametricObjectDescriptor.basePrimitive.box;
 }
 
 renderer::parametric_model::CylinderSpec ViewerWindow::Viewport::cylinderSpec() const {
-    return sceneObjects_[1].primitiveDescriptor.cylinder;
+    return sceneObjects_[1].parametricObjectDescriptor.basePrimitive.cylinder;
 }
 
 renderer::parametric_model::SphereSpec ViewerWindow::Viewport::sphereSpec() const {
-    return sceneObjects_[2].primitiveDescriptor.sphere;
+    return sceneObjects_[2].parametricObjectDescriptor.basePrimitive.sphere;
 }
 
 float ViewerWindow::Viewport::nearPlane() const {
@@ -766,6 +903,24 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
         objectState.rotationSpeed = objectRotationSpeed(index);
         objectState.color = objectColor(index);
         objectState.bounds = objectLocalBounds(index);
+
+        const auto* mirrorOperator = findObjectOperator(
+            sceneObjects_[index].parametricObjectDescriptor,
+            renderer::parametric_model::OperatorKind::mirror);
+        if (mirrorOperator != nullptr) {
+            objectState.mirror.enabled = mirrorOperator->enabled;
+            objectState.mirror.axis = static_cast<int>(mirrorOperator->mirror.axis);
+            objectState.mirror.planeOffset = mirrorOperator->mirror.planeOffset;
+        }
+
+        const auto* linearArrayOperator = findObjectOperator(
+            sceneObjects_[index].parametricObjectDescriptor,
+            renderer::parametric_model::OperatorKind::linear_array);
+        if (linearArrayOperator != nullptr) {
+            objectState.linearArray.enabled = linearArrayOperator->enabled;
+            objectState.linearArray.count = static_cast<int>(linearArrayOperator->linearArray.count);
+            objectState.linearArray.offset = linearArrayOperator->linearArray.offset;
+        }
     }
 
     state.lighting.ambientStrength = ambientStrength();
@@ -1193,15 +1348,50 @@ void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aa
     notifyCameraStateChanged();
 }
 
-void ViewerWindow::Viewport::applyPrimitiveDescriptor(
+renderer::parametric_model::OperatorDescriptor* ViewerWindow::Viewport::ensureObjectOperator(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::OperatorKind kind)
+{
+    for (auto& operatorDescriptor : descriptor.operators) {
+        if (operatorDescriptor.kind == kind) {
+            return &operatorDescriptor;
+        }
+    }
+
+    if (kind == renderer::parametric_model::OperatorKind::mirror) {
+        descriptor.operators.insert(descriptor.operators.begin(), makeMirrorOperatorDescriptor());
+        return &descriptor.operators.front();
+    }
+
+    if (kind == renderer::parametric_model::OperatorKind::linear_array) {
+        descriptor.operators.push_back(makeLinearArrayOperatorDescriptor());
+        return &descriptor.operators.back();
+    }
+
+    return nullptr;
+}
+
+const renderer::parametric_model::OperatorDescriptor* ViewerWindow::Viewport::findObjectOperator(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::OperatorKind kind) const
+{
+    for (const auto& operatorDescriptor : descriptor.operators) {
+        if (operatorDescriptor.kind == kind) {
+            return &operatorDescriptor;
+        }
+    }
+    return nullptr;
+}
+
+void ViewerWindow::Viewport::applyParametricObjectDescriptor(
     int index,
-    const renderer::parametric_model::PrimitiveDescriptor& descriptor)
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
 {
     if (index < 0 || index >= kSceneObjectCount) {
         return;
     }
 
-    sceneObjects_[index].primitiveDescriptor = descriptor;
+    sceneObjects_[index].parametricObjectDescriptor = descriptor;
     rebuildObjectMesh(index);
     markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
     processPendingModelChange();
@@ -1214,7 +1404,7 @@ void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
     }
 
     auto& sceneObject = sceneObjects_[index];
-    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.primitiveDescriptor);
+    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
 
     if (renderer_.isInitialized()) {
         bool meshReady = false;
