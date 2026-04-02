@@ -15,6 +15,8 @@ add_executable(test_viewer
     src/camera_focus_bounds_utils.cpp
     src/camera_focus_utils.h
     src/camera_focus_utils.cpp
+    src/model_change_view_state.h
+    src/model_change_view_state.cpp
     src/viewport_zoom_state.h
     src/viewport_zoom_state.cpp
     src/orbit_camera_controller.h

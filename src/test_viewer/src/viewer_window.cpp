@@ -86,6 +86,32 @@ renderer::scene_contract::Vec3f scaleVec3(
     };
 }
 
+renderer::scene_contract::Aabb mergeAabb(
+    const renderer::scene_contract::Aabb& left,
+    const renderer::scene_contract::Aabb& right)
+{
+    if (!left.valid) {
+        return right;
+    }
+    if (!right.valid) {
+        return left;
+    }
+
+    renderer::scene_contract::Aabb merged;
+    merged.min = {
+        std::min(left.min.x, right.min.x),
+        std::min(left.min.y, right.min.y),
+        std::min(left.min.z, right.min.z)
+    };
+    merged.max = {
+        std::max(left.max.x, right.max.x),
+        std::max(left.max.y, right.max.y),
+        std::max(left.max.z, right.max.z)
+    };
+    merged.valid = true;
+    return merged;
+}
+
 struct CameraFrame {
     renderer::scene_contract::Vec3f position {};
     renderer::scene_contract::Vec3f forward {0.0F, 0.0F, -1.0F};
@@ -265,6 +291,12 @@ void ViewerWindow::bindControlPanelSignals() {
                 ? OrbitCameraController::ZoomMode::lens
                 : OrbitCameraController::ZoomMode::dolly);
     });
+    connect(controlPanel_, &ViewerControlPanel::modelChangeViewStrategyChanged, this, [this](int strategy) {
+        viewport_->setModelChangeViewStrategy(
+            strategy == 1
+                ? model_change_view::ViewStrategy::auto_frame
+                : model_change_view::ViewStrategy::keep_view);
+    });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
     });
@@ -326,6 +358,7 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     sceneObjects_[2].visible = kDefaultSceneObjects[2].visible;
 
     light_ = kDefaultLight;
+    model_change_view::setViewStrategy(modelChangeViewState_, model_change_view::ViewStrategy::keep_view);
     cameraController_.setOrbitCenter({0.0F, kDefaultCameraTargetY, 0.0F});
     cameraController_.setDistance(kDefaultCameraDistance);
     cameraController_.setProjection(kDefaultVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
@@ -438,6 +471,8 @@ void ViewerWindow::Viewport::setObjectVisible(int index, bool visible) {
     }
 
     sceneObjects_[index].visible = visible;
+    markModelChanged(model_change_view::ChangeKind::scene_visibility);
+    processPendingModelChange();
     update();
 }
 
@@ -537,6 +572,16 @@ OrbitCameraController::ZoomMode ViewerWindow::Viewport::zoomMode() const {
     return cameraController_.zoomMode();
 }
 
+void ViewerWindow::Viewport::setModelChangeViewStrategy(model_change_view::ViewStrategy strategy) {
+    model_change_view::setViewStrategy(modelChangeViewState_, strategy);
+    notifyCameraStateChanged();
+    update();
+}
+
+model_change_view::ViewStrategy ViewerWindow::Viewport::modelChangeViewStrategy() const {
+    return modelChangeViewState_.viewStrategy;
+}
+
 void ViewerWindow::Viewport::setVerticalFovDegrees(float degrees) {
     cameraController_.setVerticalFovDegrees(degrees);
     notifyCameraStateChanged();
@@ -592,6 +637,8 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
     state.lighting.ambientStrength = ambientStrength();
     state.lighting.lightDirection = lightDirection();
     state.camera = cameraPanelState();
+    state.modelChangeViewStrategy =
+        modelChangeViewStrategy() == model_change_view::ViewStrategy::auto_frame ? 1 : 0;
     return state;
 }
 
@@ -684,6 +731,35 @@ void ViewerWindow::Viewport::applyViewportZoom(const QPointF& viewportPosition, 
         cameraController_.setOrbitCenter(
             renderer::scene_contract::math::add(cameraController_.orbitCenter(), compensation));
     }
+}
+
+void ViewerWindow::Viewport::markModelChanged(model_change_view::ChangeKind changeKind) {
+    model_change_view::markModelChanged(modelChangeViewState_, changeKind);
+}
+
+void ViewerWindow::Viewport::processPendingModelChange() {
+    const auto actions = model_change_view::pendingActions(modelChangeViewState_);
+    if (!actions.updateBoundsAndClip) {
+        return;
+    }
+
+    updateSceneTransforms();
+
+    const auto bounds = visibleSceneWorldBounds();
+    if (actions.autoFrame) {
+        applyFocusBounds(visibleFocusBounds());
+        model_change_view::clearPending(modelChangeViewState_);
+        return;
+    }
+
+    if (bounds.valid) {
+        cameraController_.updateClipRangeForBounds(bounds);
+    } else {
+        cameraController_.updateClipRangeForPoint(cameraController_.orbitCenter());
+    }
+
+    model_change_view::clearPending(modelChangeViewState_);
+    notifyCameraStateChanged();
 }
 
 void ViewerWindow::Viewport::setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter) {
@@ -997,6 +1073,19 @@ renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleFocusBounds() cons
         }
         bounds = camera_focus_bounds::mergeFocusBounds(bounds, objectFocusBounds(index));
     }
+    return bounds;
+}
+
+renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleSceneWorldBounds() const {
+    renderer::scene_contract::Aabb bounds;
+
+    for (const auto& sceneObject : sceneObjects_) {
+        if (!sceneObject.visible) {
+            continue;
+        }
+        bounds = mergeAabb(bounds, repository_.rangeData(sceneObject.itemId).worldBounds);
+    }
+
     return bounds;
 }
 

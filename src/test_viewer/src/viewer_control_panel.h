@@ -44,6 +44,7 @@ public:
         std::array<SceneObjectPanelState, kSceneObjectCount> objects {};
         LightingPanelState lighting {};
         CameraPanelState camera {};
+        int modelChangeViewStrategy = 0;
     };
 
     explicit ViewerControlPanel(QWidget* parent = nullptr);
@@ -65,6 +66,7 @@ signals:
     void focusAllRequested();
     void resetDefaultsRequested();
     void focusSphereRequested();
+    void modelChangeViewStrategyChanged(int strategy);
 
 private:
     void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
@@ -76,4 +78,5 @@ private:
     std::array<QLabel*, kSceneObjectCount> objectBoundsLabels_ {};
     LightingControlWidget* lightingWidget_ = nullptr;
     CameraControlWidget* cameraWidget_ = nullptr;
+    class QComboBox* modelChangeViewStrategyComboBox_ = nullptr;
 };

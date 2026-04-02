@@ -3,7 +3,9 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QComboBox>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 namespace {
@@ -100,6 +102,18 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     auto* actionGroup = new QGroupBox("Actions", contentWidget);
     auto* actionLayout = new QVBoxLayout(actionGroup);
 
+    modelChangeViewStrategyComboBox_ = new QComboBox(actionGroup);
+    modelChangeViewStrategyComboBox_->addItem("Keep View", 0);
+    modelChangeViewStrategyComboBox_->addItem("Auto Frame", 1);
+    connect(
+        modelChangeViewStrategyComboBox_,
+        qOverload<int>(&QComboBox::currentIndexChanged),
+        this,
+        [this](int index) {
+            emit modelChangeViewStrategyChanged(
+                modelChangeViewStrategyComboBox_->itemData(index).toInt());
+        });
+
     auto* boundsGroup = new QGroupBox("Bounds", contentWidget);
     auto* boundsLayout = new QVBoxLayout(boundsGroup);
     for (int index = 0; index < kSceneObjectCount; ++index) {
@@ -125,6 +139,8 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         emit focusAllRequested();
     });
 
+    actionLayout->addWidget(new QLabel("Model Change View", actionGroup));
+    actionLayout->addWidget(modelChangeViewStrategyComboBox_);
     actionLayout->addWidget(resetButton);
     actionLayout->addWidget(sphereFocusButton);
     actionLayout->addWidget(focusAllButton);
@@ -145,6 +161,13 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
 
     setLightingState(state.lighting.ambientStrength, state.lighting.lightDirection);
     setCameraState(state.camera);
+    if (modelChangeViewStrategyComboBox_ != nullptr) {
+        const QSignalBlocker blocker(modelChangeViewStrategyComboBox_);
+        const int comboIndex = modelChangeViewStrategyComboBox_->findData(state.modelChangeViewStrategy);
+        if (comboIndex >= 0) {
+            modelChangeViewStrategyComboBox_->setCurrentIndex(comboIndex);
+        }
+    }
 }
 
 void ViewerControlPanel::setObjectState(

@@ -19,6 +19,7 @@ class QWheelEvent;
 class QPointF;
 
 #include "orbit_camera_controller.h"
+#include "model_change_view_state.h"
 #include "viewport_zoom_state.h"
 #include "viewer_control_panel.h"
 #include "renderer/render_core/frame_assembler.h"
@@ -64,6 +65,8 @@ private:
         [[nodiscard]] OrbitCameraController::ProjectionMode projectionMode() const;
         void setZoomMode(OrbitCameraController::ZoomMode mode);
         [[nodiscard]] OrbitCameraController::ZoomMode zoomMode() const;
+        void setModelChangeViewStrategy(model_change_view::ViewStrategy strategy);
+        [[nodiscard]] model_change_view::ViewStrategy modelChangeViewStrategy() const;
         void setVerticalFovDegrees(float degrees);
         [[nodiscard]] float verticalFovDegrees() const;
         void setOrthographicHeight(float height);
@@ -95,12 +98,15 @@ private:
         [[nodiscard]] renderer::scene_contract::TransformData currentObjectTransform(int index) const;
         [[nodiscard]] viewport_zoom::AnchorSample sampleViewportZoomAnchor(const QPointF& viewportPosition) const;
         void applyViewportZoom(const QPointF& viewportPosition, float deltaDistance);
+        void markModelChanged(model_change_view::ChangeKind changeKind);
+        void processPendingModelChange();
         void notifyCameraStateChanged();
         void refreshViewportZoomState();
         void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
         void updateSceneTransforms();
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
+        [[nodiscard]] renderer::scene_contract::Aabb visibleSceneWorldBounds() const;
         void rebuildFramePacket();
 
         struct SceneObject {
@@ -126,6 +132,7 @@ private:
         renderer::render_core::FrameAssembler assembler_;
         renderer::render_core::FramePacket framePacket_;
         renderer::render_gl::GlRenderer renderer_;
+        model_change_view::State modelChangeViewState_ {};
         viewport_zoom::State viewportZoomState_ {};
         std::unique_ptr<QOpenGLFramebufferObject> offscreenTarget_;
         std::function<void()> cameraStateChangedCallback_;
