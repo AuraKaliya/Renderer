@@ -19,6 +19,8 @@
 namespace {
 
 constexpr std::size_t kSceneObjectCount = 3;
+constexpr int kDefaultWindowWidth = 1240;
+constexpr int kDefaultWindowHeight = 680;
 
 struct SceneObjectDefaults {
     renderer::scene_contract::ColorRgba color;
@@ -61,6 +63,62 @@ const float kDefaultCameraPitchRadians = std::atan2(
 constexpr float kOrbitRotateSensitivity = 0.0125F;
 constexpr float kWheelZoomStep = 0.35F;
 constexpr float kPanViewportFactor = 1.0F;
+constexpr float kViewportZoomRayEpsilon = 0.0001F;
+
+float clampUnit(float value) {
+    if (value < 0.0F) {
+        return 0.0F;
+    }
+    if (value > 1.0F) {
+        return 1.0F;
+    }
+    return value;
+}
+
+renderer::scene_contract::Vec3f scaleVec3(
+    const renderer::scene_contract::Vec3f& value,
+    float factor)
+{
+    return {
+        value.x * factor,
+        value.y * factor,
+        value.z * factor
+    };
+}
+
+struct CameraFrame {
+    renderer::scene_contract::Vec3f position {};
+    renderer::scene_contract::Vec3f forward {0.0F, 0.0F, -1.0F};
+    renderer::scene_contract::Vec3f right {1.0F, 0.0F, 0.0F};
+    renderer::scene_contract::Vec3f up {0.0F, 1.0F, 0.0F};
+};
+
+CameraFrame makeCameraFrame(const OrbitCameraController& cameraController) {
+    const auto orbitCenter = cameraController.orbitCenter();
+    const float distance = cameraController.distance();
+    const float yawRadians = cameraController.yawRadians();
+    const float pitchRadians = cameraController.pitchRadians();
+    const float cosPitch = std::cos(pitchRadians);
+    const float sinPitch = std::sin(pitchRadians);
+
+    CameraFrame frame;
+    frame.position = {
+        orbitCenter.x + distance * cosPitch * std::sin(yawRadians),
+        orbitCenter.y + distance * sinPitch,
+        orbitCenter.z + distance * cosPitch * std::cos(yawRadians)
+    };
+
+    frame.forward = renderer::scene_contract::math::normalize(
+        renderer::scene_contract::math::subtract(orbitCenter, frame.position));
+    frame.right = renderer::scene_contract::math::normalize(
+        renderer::scene_contract::math::cross(frame.forward, {0.0F, 1.0F, 0.0F}));
+    if (renderer::scene_contract::math::length(frame.right) <= kViewportZoomRayEpsilon) {
+        frame.right = {1.0F, 0.0F, 0.0F};
+    }
+    frame.up = renderer::scene_contract::math::normalize(
+        renderer::scene_contract::math::cross(frame.right, frame.forward));
+    return frame;
+}
 
 renderer::render_gl::ProcAddress resolveGlProc(const char* name, void* userData) {
     (void)userData;
@@ -170,7 +228,7 @@ ViewerWindow::ViewerWindow() {
     bindControlPanelSignals();
 
     setCentralWidget(centralWidget);
-    resize(1280, 720);
+    resize(kDefaultWindowWidth, kDefaultWindowHeight);
     setWindowTitle("Renderer Test Viewer");
     syncControlPanel();
 }
@@ -274,6 +332,8 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
+    viewport_zoom::reset(viewportZoomState_);
+    refreshViewportZoomState();
 
     animationClock_.start();
 
@@ -292,6 +352,7 @@ void ViewerWindow::Viewport::resetDefaults() {
     cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
+    viewport_zoom::reset(viewportZoomState_);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         const auto& defaults = kDefaultSceneObjects[index];
@@ -311,6 +372,7 @@ void ViewerWindow::Viewport::resetDefaults() {
         }
     }
 
+    refreshViewportZoomState();
     update();
 }
 
@@ -320,6 +382,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
+    viewport_zoom::reset(viewportZoomState_);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         auto& sceneObject = sceneObjects_[index];
@@ -361,6 +424,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
 
     updateSceneTransforms();
     cameraController_.focusOnBounds(objectFocusBounds(2));
+    refreshViewportZoomState();
     if (cameraStateChangedCallback_) {
         cameraStateChangedCallback_();
     }
@@ -453,6 +517,7 @@ float ViewerWindow::Viewport::cameraDistance() const {
 
 void ViewerWindow::Viewport::setProjectionMode(OrbitCameraController::ProjectionMode mode) {
     cameraController_.setProjectionMode(mode);
+    refreshViewportZoomState();
     notifyCameraStateChanged();
     update();
 }
@@ -463,6 +528,7 @@ OrbitCameraController::ProjectionMode ViewerWindow::Viewport::projectionMode() c
 
 void ViewerWindow::Viewport::setZoomMode(OrbitCameraController::ZoomMode mode) {
     cameraController_.setZoomMode(mode);
+    refreshViewportZoomState();
     notifyCameraStateChanged();
     update();
 }
@@ -512,8 +578,117 @@ ViewerControlPanel::CameraPanelState ViewerWindow::Viewport::cameraPanelState() 
     return state;
 }
 
+ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const {
+    ViewerControlPanel::PanelState state;
+
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        auto& objectState = state.objects[index];
+        objectState.visible = objectVisible(index);
+        objectState.rotationSpeed = objectRotationSpeed(index);
+        objectState.color = objectColor(index);
+        objectState.bounds = objectLocalBounds(index);
+    }
+
+    state.lighting.ambientStrength = ambientStrength();
+    state.lighting.lightDirection = lightDirection();
+    state.camera = cameraPanelState();
+    return state;
+}
+
+viewport_zoom::AnchorSample ViewerWindow::Viewport::sampleViewportZoomAnchor(const QPointF& viewportPosition) const {
+    viewport_zoom::AnchorSample sample;
+    if (width() <= 0 || height() <= 0) {
+        return sample;
+    }
+
+    const float normalizedX = clampUnit(static_cast<float>(viewportPosition.x()) / static_cast<float>(width()));
+    const float normalizedY = clampUnit(static_cast<float>(viewportPosition.y()) / static_cast<float>(height()));
+    sample.viewportPositionNormalized = {normalizedX, normalizedY};
+
+    const auto cameraFrame = makeCameraFrame(cameraController_);
+    const auto planePoint = orbitCenter();
+    const auto planeNormal = cameraFrame.forward;
+    if (renderer::scene_contract::math::length(planeNormal) <= kViewportZoomRayEpsilon) {
+        return sample;
+    }
+
+    const float ndcX = normalizedX * 2.0F - 1.0F;
+    const float ndcY = 1.0F - normalizedY * 2.0F;
+    const float aspectRatio = static_cast<float>(width()) / static_cast<float>(height());
+
+    renderer::scene_contract::Vec3f rayOrigin = cameraFrame.position;
+    renderer::scene_contract::Vec3f rayDirection = cameraFrame.forward;
+
+    if (projectionMode() == OrbitCameraController::ProjectionMode::perspective) {
+        const float tanHalfFov = std::tan(
+            verticalFovDegrees() * 0.5F * renderer::scene_contract::math::kPi / 180.0F);
+        const auto horizontalOffset = scaleVec3(cameraFrame.right, ndcX * aspectRatio * tanHalfFov);
+        const auto verticalOffset = scaleVec3(cameraFrame.up, ndcY * tanHalfFov);
+        rayDirection = renderer::scene_contract::math::normalize(
+            renderer::scene_contract::math::add(
+                cameraFrame.forward,
+                renderer::scene_contract::math::add(horizontalOffset, verticalOffset)));
+    } else {
+        const float halfHeight = orthographicHeight() * 0.5F;
+        const float halfWidth = halfHeight * aspectRatio;
+        rayOrigin = renderer::scene_contract::math::add(
+            rayOrigin,
+            renderer::scene_contract::math::add(
+                scaleVec3(cameraFrame.right, ndcX * halfWidth),
+                scaleVec3(cameraFrame.up, ndcY * halfHeight)));
+    }
+
+    const float denominator = renderer::scene_contract::math::dot(rayDirection, planeNormal);
+    if (std::abs(denominator) <= kViewportZoomRayEpsilon) {
+        return sample;
+    }
+
+    const float distanceToPlane = renderer::scene_contract::math::dot(
+        renderer::scene_contract::math::subtract(planePoint, rayOrigin),
+        planeNormal) / denominator;
+    if (distanceToPlane <= 0.0F) {
+        return sample;
+    }
+
+    sample.worldPoint = renderer::scene_contract::math::add(
+        rayOrigin,
+        scaleVec3(rayDirection, distanceToPlane));
+    sample.valid = true;
+    return sample;
+}
+
+void ViewerWindow::Viewport::applyViewportZoom(const QPointF& viewportPosition, float deltaDistance) {
+    const auto preZoomAnchor = sampleViewportZoomAnchor(viewportPosition);
+    if (preZoomAnchor.valid) {
+        viewport_zoom::begin(
+            viewportZoomState_,
+            preZoomAnchor.viewportPositionNormalized,
+            preZoomAnchor.worldPoint);
+    } else {
+        viewport_zoom::reset(viewportZoomState_);
+        refreshViewportZoomState();
+    }
+
+    cameraController_.zoom(deltaDistance);
+
+    if (!preZoomAnchor.valid) {
+        refreshViewportZoomState();
+        return;
+    }
+
+    const auto postZoomAnchor = sampleViewportZoomAnchor(viewportPosition);
+    if (postZoomAnchor.valid) {
+        const auto compensation = renderer::scene_contract::math::subtract(
+            preZoomAnchor.worldPoint,
+            postZoomAnchor.worldPoint);
+        cameraController_.setOrbitCenter(
+            renderer::scene_contract::math::add(cameraController_.orbitCenter(), compensation));
+    }
+}
+
 void ViewerWindow::Viewport::setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter) {
     cameraController_.setOrbitCenter(orbitCenter);
+    refreshViewportZoomState();
     update();
 }
 
@@ -522,7 +697,9 @@ renderer::scene_contract::Vec3f ViewerWindow::Viewport::orbitCenter() const {
 }
 
 void ViewerWindow::Viewport::focusOnPoint(const renderer::scene_contract::Vec3f& point) {
+    viewport_zoom::reset(viewportZoomState_);
     cameraController_.focusOnPoint(point);
+    refreshViewportZoomState();
     notifyCameraStateChanged();
     update();
 }
@@ -696,6 +873,7 @@ void ViewerWindow::Viewport::mouseMoveEvent(QMouseEvent* event) {
             cameraController_.pan(
                 -static_cast<float>(delta.x()) * worldUnitsPerPixel * kPanViewportFactor,
                 static_cast<float>(delta.y()) * worldUnitsPerPixel * kPanViewportFactor);
+            refreshViewportZoomState();
         }
 
         if (cameraStateChangedCallback_) {
@@ -744,7 +922,13 @@ void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
         return;
     }
 
-    cameraController_.zoom(-static_cast<float>(angleDelta.y()) / 120.0F * kWheelZoomStep);
+    const float zoomDelta = -static_cast<float>(angleDelta.y()) / 120.0F * kWheelZoomStep;
+    if (event->modifiers().testFlag(Qt::ControlModifier)) {
+        applyViewportZoom(event->position(), zoomDelta);
+    } else {
+        cameraController_.zoom(zoomDelta);
+        refreshViewportZoomState();
+    }
     updateSceneTransforms();
     const auto bounds = visibleFocusBounds();
     if (bounds.valid) {
@@ -779,12 +963,20 @@ void ViewerWindow::Viewport::notifyCameraStateChanged() {
     }
 }
 
+void ViewerWindow::Viewport::refreshViewportZoomState() {
+    viewportZoomState_.zoomOperationKind = viewport_zoom::chooseZoomOperationKind(
+        projectionMode() == OrbitCameraController::ProjectionMode::orthographic,
+        zoomMode() == OrbitCameraController::ZoomMode::lens);
+}
+
 void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aabb& bounds) {
     if (bounds.valid) {
         cameraController_.focusOnBounds(bounds);
     } else {
         cameraController_.updateClipRangeForPoint(cameraController_.orbitCenter());
     }
+    viewport_zoom::reset(viewportZoomState_);
+    refreshViewportZoomState();
     notifyCameraStateChanged();
 }
 
@@ -850,30 +1042,5 @@ void ViewerWindow::syncControlPanel() {
         return;
     }
 
-    syncSceneObjectPanel();
-    syncLightingPanel();
-    syncCameraPanel();
-}
-
-void ViewerWindow::syncSceneObjectPanel() {
-    for (int index = 0; index < Viewport::kSceneObjectCount; ++index) {
-        controlPanel_->setObjectState(
-            index,
-            viewport_->objectVisible(index),
-            viewport_->objectRotationSpeed(index),
-            viewport_->objectColor(index));
-        controlPanel_->setObjectBounds(
-            index,
-            viewport_->objectLocalBounds(index));
-    }
-}
-
-void ViewerWindow::syncLightingPanel() {
-    controlPanel_->setLightingState(
-        viewport_->ambientStrength(),
-        viewport_->lightDirection());
-}
-
-void ViewerWindow::syncCameraPanel() {
-    controlPanel_->setCameraState(viewport_->cameraPanelState());
+    controlPanel_->setPanelState(viewport_->controlPanelState());
 }

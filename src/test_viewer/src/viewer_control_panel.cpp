@@ -3,6 +3,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 namespace {
@@ -37,11 +38,24 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     setFixedWidth(320);
 
     auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(12, 12, 12, 12);
-    rootLayout->setSpacing(10);
+    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setSpacing(0);
+
+    auto* scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* contentWidget = new QWidget(scrollArea);
+    auto* contentLayout = new QVBoxLayout(contentWidget);
+    contentLayout->setContentsMargins(12, 12, 12, 12);
+    contentLayout->setSpacing(10);
+    scrollArea->setWidget(contentWidget);
+
+    rootLayout->addWidget(scrollArea);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
-        auto* objectWidget = new SceneObjectControlWidget(QString::fromLatin1(kObjectNames[index]), this);
+        auto* objectWidget = new SceneObjectControlWidget(QString::fromLatin1(kObjectNames[index]), contentWidget);
         connect(objectWidget, &SceneObjectControlWidget::visibleChanged, this, [this, index](bool visible) {
             emit objectVisibleChanged(index, visible);
         });
@@ -52,10 +66,10 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
             emit objectColorChanged(index, red, green, blue);
         });
         objectWidgets_[index] = objectWidget;
-        rootLayout->addWidget(objectWidget);
+        contentLayout->addWidget(objectWidget);
     }
 
-    lightingWidget_ = new LightingControlWidget(this);
+    lightingWidget_ = new LightingControlWidget(contentWidget);
     connect(lightingWidget_, &LightingControlWidget::ambientStrengthChanged, this, [this](float strength) {
         emit ambientStrengthChanged(strength);
     });
@@ -63,7 +77,7 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         emit lightDirectionChanged(x, y, z);
     });
 
-    cameraWidget_ = new CameraControlWidget(this);
+    cameraWidget_ = new CameraControlWidget(contentWidget);
     connect(cameraWidget_, &CameraControlWidget::projectionModeChanged, this, [this](int mode) {
         emit projectionModeChanged(mode);
     });
@@ -83,10 +97,10 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         emit focusPointRequested(x, y, z);
     });
 
-    auto* actionGroup = new QGroupBox("Actions", this);
+    auto* actionGroup = new QGroupBox("Actions", contentWidget);
     auto* actionLayout = new QVBoxLayout(actionGroup);
 
-    auto* boundsGroup = new QGroupBox("Bounds", this);
+    auto* boundsGroup = new QGroupBox("Bounds", contentWidget);
     auto* boundsLayout = new QVBoxLayout(boundsGroup);
     for (int index = 0; index < kSceneObjectCount; ++index) {
         auto* label = new QLabel(boundsGroup);
@@ -115,11 +129,22 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     actionLayout->addWidget(sphereFocusButton);
     actionLayout->addWidget(focusAllButton);
 
-    rootLayout->addWidget(lightingWidget_);
-    rootLayout->addWidget(cameraWidget_);
-    rootLayout->addWidget(boundsGroup);
-    rootLayout->addWidget(actionGroup);
-    rootLayout->addStretch(1);
+    contentLayout->addWidget(lightingWidget_);
+    contentLayout->addWidget(cameraWidget_);
+    contentLayout->addWidget(boundsGroup);
+    contentLayout->addWidget(actionGroup);
+    contentLayout->addStretch(1);
+}
+
+void ViewerControlPanel::setPanelState(const PanelState& state) {
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        const auto& object = state.objects[index];
+        setObjectState(index, object.visible, object.rotationSpeed, object.color);
+        setObjectBounds(index, object.bounds);
+    }
+
+    setLightingState(state.lighting.ambientStrength, state.lighting.lightDirection);
+    setCameraState(state.camera);
 }
 
 void ViewerControlPanel::setObjectState(

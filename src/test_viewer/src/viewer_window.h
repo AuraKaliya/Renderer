@@ -16,8 +16,10 @@ class QMouseEvent;
 class QFocusEvent;
 class QEvent;
 class QWheelEvent;
+class QPointF;
 
 #include "orbit_camera_controller.h"
+#include "viewport_zoom_state.h"
 #include "viewer_control_panel.h"
 #include "renderer/render_core/frame_assembler.h"
 #include "renderer/render_core/scene_repository.h"
@@ -30,9 +32,6 @@ public:
 
 private:
     void bindControlPanelSignals();
-    void syncSceneObjectPanel();
-    void syncLightingPanel();
-    void syncCameraPanel();
     class Viewport final : public QOpenGLWidget, protected QOpenGLExtraFunctions {
     public:
         static constexpr int kSceneObjectCount = 3;
@@ -72,6 +71,7 @@ private:
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
         [[nodiscard]] ViewerControlPanel::CameraPanelState cameraPanelState() const;
+        [[nodiscard]] ViewerControlPanel::PanelState controlPanelState() const;
 
         void setOrbitCenter(const renderer::scene_contract::Vec3f& orbitCenter);
         [[nodiscard]] renderer::scene_contract::Vec3f orbitCenter() const;
@@ -93,7 +93,10 @@ private:
 
     private:
         [[nodiscard]] renderer::scene_contract::TransformData currentObjectTransform(int index) const;
+        [[nodiscard]] viewport_zoom::AnchorSample sampleViewportZoomAnchor(const QPointF& viewportPosition) const;
+        void applyViewportZoom(const QPointF& viewportPosition, float deltaDistance);
         void notifyCameraStateChanged();
+        void refreshViewportZoomState();
         void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
         void updateSceneTransforms();
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
@@ -123,6 +126,7 @@ private:
         renderer::render_core::FrameAssembler assembler_;
         renderer::render_core::FramePacket framePacket_;
         renderer::render_gl::GlRenderer renderer_;
+        viewport_zoom::State viewportZoomState_ {};
         std::unique_ptr<QOpenGLFramebufferObject> offscreenTarget_;
         std::function<void()> cameraStateChangedCallback_;
         QPoint lastMousePosition_;

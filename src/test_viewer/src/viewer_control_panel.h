@@ -28,12 +28,27 @@ public:
         renderer::scene_contract::Vec3f orbitCenter {};
     };
 
+    struct SceneObjectPanelState {
+        bool visible = true;
+        float rotationSpeed = 0.0F;
+        renderer::scene_contract::ColorRgba color {};
+        renderer::scene_contract::Aabb bounds {};
+    };
+
+    struct LightingPanelState {
+        float ambientStrength = 0.0F;
+        renderer::scene_contract::Vec3f lightDirection {};
+    };
+
+    struct PanelState {
+        std::array<SceneObjectPanelState, kSceneObjectCount> objects {};
+        LightingPanelState lighting {};
+        CameraPanelState camera {};
+    };
+
     explicit ViewerControlPanel(QWidget* parent = nullptr);
 
-    void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
-    void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
-    void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
-    void setCameraState(const CameraPanelState& state);
+    void setPanelState(const PanelState& state);
 
 signals:
     void objectVisibleChanged(int index, bool visible);
@@ -52,6 +67,11 @@ signals:
     void focusSphereRequested();
 
 private:
+    void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
+    void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
+    void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
+    void setCameraState(const CameraPanelState& state);
+
     std::array<SceneObjectControlWidget*, kSceneObjectCount> objectWidgets_ {};
     std::array<QLabel*, kSceneObjectCount> objectBoundsLabels_ {};
     LightingControlWidget* lightingWidget_ = nullptr;

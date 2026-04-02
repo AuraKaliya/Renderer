@@ -15,10 +15,14 @@ add_executable(test_viewer
     src/camera_focus_bounds_utils.cpp
     src/camera_focus_utils.h
     src/camera_focus_utils.cpp
+    src/viewport_zoom_state.h
+    src/viewport_zoom_state.cpp
     src/orbit_camera_controller.h
     src/orbit_camera_controller.cpp
     src/lighting_control_widget.h
     src/lighting_control_widget.cpp
+    src/camera_mode_ui_policy.h
+    src/camera_mode_ui_policy.cpp
     src/camera_control_widget.h
     src/camera_control_widget.cpp
     src/scene_object_control_widget.h

@@ -1,5 +1,7 @@
 #include "camera_control_widget.h"
 
+#include "camera_mode_ui_policy.h"
+
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -25,76 +27,31 @@ QString formatNearFarText(float nearPlane, float farPlane) {
         .arg(farPlane, 0, 'f', 3);
 }
 
-enum class ParameterRole {
-    primary,
-    secondary,
-    inactive
-};
-
-struct CameraUiRuleSet {
-    bool zoomModeEditable = false;
-    bool distanceEditable = false;
-    bool fovEditable = false;
-    bool orthographicHeightEditable = false;
-    ParameterRole distanceRole = ParameterRole::inactive;
-    ParameterRole fovRole = ParameterRole::inactive;
-    ParameterRole orthographicHeightRole = ParameterRole::inactive;
-};
-
-QString formatRoleText(ParameterRole role) {
+QString formatRoleText(camera_mode_ui_policy::ParameterRole role) {
     switch (role) {
-    case ParameterRole::primary:
+    case camera_mode_ui_policy::ParameterRole::primary:
         return QStringLiteral("Primary");
-    case ParameterRole::secondary:
+    case camera_mode_ui_policy::ParameterRole::secondary:
         return QStringLiteral("Secondary");
-    case ParameterRole::inactive:
+    case camera_mode_ui_policy::ParameterRole::inactive:
     default:
         return QStringLiteral("Inactive");
     }
 }
 
-void applyRoleLabelStyle(QLabel* label, ParameterRole role) {
+void applyRoleLabelStyle(QLabel* label, camera_mode_ui_policy::ParameterRole role) {
     switch (role) {
-    case ParameterRole::primary:
+    case camera_mode_ui_policy::ParameterRole::primary:
         label->setStyleSheet(QStringLiteral("color: #1f5f2c; font-weight: 600;"));
         break;
-    case ParameterRole::secondary:
+    case camera_mode_ui_policy::ParameterRole::secondary:
         label->setStyleSheet(QStringLiteral("color: #6a6a6a;"));
         break;
-    case ParameterRole::inactive:
+    case camera_mode_ui_policy::ParameterRole::inactive:
     default:
         label->setStyleSheet(QStringLiteral("color: #9a9a9a;"));
         break;
     }
-}
-
-CameraUiRuleSet makeUiRuleSet(int projectionMode, int zoomMode) {
-    const bool perspective = projectionMode == 0;
-    const bool lens = zoomMode == 1;
-
-    CameraUiRuleSet rules;
-    rules.zoomModeEditable = perspective;
-
-    if (perspective && !lens) {
-        rules.distanceEditable = true;
-        rules.fovEditable = true;
-        rules.distanceRole = ParameterRole::primary;
-        rules.fovRole = ParameterRole::secondary;
-        return rules;
-    }
-
-    if (perspective && lens) {
-        rules.distanceEditable = true;
-        rules.fovEditable = true;
-        rules.distanceRole = ParameterRole::secondary;
-        rules.fovRole = ParameterRole::primary;
-        return rules;
-    }
-
-    rules.orthographicHeightEditable = true;
-    rules.distanceRole = ParameterRole::secondary;
-    rules.orthographicHeightRole = ParameterRole::primary;
-    return rules;
 }
 
 QWidget* makeLabeledControlRow(
@@ -264,7 +221,7 @@ void CameraControlWidget::setCameraState(
     focusPointYSpinBox_->setValue(orbitCenter.y);
     focusPointZSpinBox_->setValue(orbitCenter.z);
 
-    const CameraUiRuleSet rules = makeUiRuleSet(projectionMode, zoomMode);
+    const auto rules = camera_mode_ui_policy::makeRuleSet(projectionMode, zoomMode);
     zoomModeComboBox_->setEnabled(rules.zoomModeEditable);
     distanceSpinBox_->setEnabled(rules.distanceEditable);
     fovSpinBox_->setEnabled(rules.fovEditable);
