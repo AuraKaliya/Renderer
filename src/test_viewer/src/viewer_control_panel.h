@@ -20,8 +20,6 @@ class ViewerControlPanel final : public QWidget {
     Q_OBJECT
 
 public:
-    static constexpr int kSceneObjectCount = 3;
-
     struct CameraPanelState {
         int projectionMode = 0;
         int zoomMode = 0;
@@ -42,6 +40,7 @@ public:
     struct SceneObjectPanelState {
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
+        renderer::parametric_model::PrimitiveDescriptor primitive {};
         bool visible = true;
         float rotationSpeed = 0.0F;
         renderer::scene_contract::ColorRgba color {};
@@ -64,14 +63,11 @@ public:
     };
 
     struct PanelState {
-        std::array<SceneObjectPanelState, kSceneObjectCount> objects {};
+        std::vector<SceneObjectPanelState> objects;
         LightingPanelState lighting {};
         CameraPanelState camera {};
         SelectionPanelState selection {};
         int modelChangeViewStrategy = 0;
-        renderer::parametric_model::BoxSpec box {};
-        renderer::parametric_model::CylinderSpec cylinder {};
-        renderer::parametric_model::SphereSpec sphere {};
     };
 
     explicit ViewerControlPanel(QWidget* parent = nullptr);
@@ -91,6 +87,8 @@ signals:
     void objectFeatureAddRequested(int index, int featureKind);
     void objectFeatureRemoveRequested(int index, int featureId);
     void objectFeatureEnabledChanged(int index, int featureId, bool enabled);
+    void objectAddRequested(int primitiveKind);
+    void deleteSelectedObjectRequested();
     void objectSelectionChanged(int objectId);
     void objectActivationRequested(int objectId);
     void featureSelectionChanged(int objectId, int featureId);
@@ -119,37 +117,39 @@ signals:
     void sphereStacksChanged(int stacks);
 
 private:
-    void setObjectState(int index, bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
-    void setObjectOperatorState(
-        int index,
-        const SceneObjectControlWidget::MirrorState& mirror,
-        const SceneObjectControlWidget::LinearArrayState& linearArray);
-    void setObjectPrimitiveState(int index, const PanelState& state);
-    void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(const CameraPanelState& state);
     void refreshObjectExplorer();
     void refreshFeatureExplorer();
+    void refreshObjectInspector();
+    void refreshBoundsList();
     void updateFeatureActionState();
     int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
+    [[nodiscard]] int currentObjectIndex() const;
+    [[nodiscard]] const SceneObjectPanelState* currentObjectState() const;
+    [[nodiscard]] SceneObjectControlWidget* currentInspectorWidget() const;
 
-    std::array<SceneObjectControlWidget*, kSceneObjectCount> objectWidgets_ {};
-    std::array<QLabel*, kSceneObjectCount> objectBoundsLabels_ {};
+    std::array<SceneObjectControlWidget*, 3> objectWidgets_ {};
     LightingControlWidget* lightingWidget_ = nullptr;
     CameraControlWidget* cameraWidget_ = nullptr;
     QListWidget* objectListWidget_ = nullptr;
     QListWidget* featureListWidget_ = nullptr;
+    QListWidget* boundsListWidget_ = nullptr;
     QLabel* objectSelectionLabel_ = nullptr;
     QLabel* featureSelectionLabel_ = nullptr;
     QCheckBox* featureEnabledCheckBox_ = nullptr;
     QPushButton* activateObjectButton_ = nullptr;
+    QPushButton* deleteSelectedObjectButton_ = nullptr;
     QPushButton* activateFeatureButton_ = nullptr;
     QPushButton* focusSelectedObjectButton_ = nullptr;
+    QPushButton* addBoxObjectButton_ = nullptr;
+    QPushButton* addCylinderObjectButton_ = nullptr;
+    QPushButton* addSphereObjectButton_ = nullptr;
     QPushButton* addMirrorFeatureButton_ = nullptr;
     QPushButton* addLinearArrayFeatureButton_ = nullptr;
     QPushButton* removeFeatureButton_ = nullptr;
     class QComboBox* modelChangeViewStrategyComboBox_ = nullptr;
     PanelState panelState_ {};
-    int inspectedObjectIndex_ = 0;
+    int inspectedObjectIndex_ = -1;
     renderer::parametric_model::ParametricFeatureId inspectedFeatureId_ = 0U;
 };

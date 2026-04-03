@@ -1,8 +1,8 @@
 #pragma once
 
-#include <array>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include <QElapsedTimer>
 #include <QMainWindow>
@@ -36,8 +36,6 @@ private:
     void bindControlPanelSignals();
     class Viewport final : public QOpenGLWidget, protected QOpenGLExtraFunctions {
     public:
-        static constexpr int kSceneObjectCount = 3;
-
         explicit Viewport(std::function<void()> cameraStateChangedCallback = {});
         ~Viewport() override;
 
@@ -73,7 +71,6 @@ private:
         void setOrthographicHeight(float height);
         [[nodiscard]] float orthographicHeight() const;
         void setBoxWidth(float width);
-        [[nodiscard]] float boxWidth() const;
         void setBoxHeight(float height);
         void setBoxDepth(float depth);
         void setCylinderRadius(float radius);
@@ -94,14 +91,13 @@ private:
             int index,
             renderer::parametric_model::ParametricFeatureId featureId,
             bool enabled);
+        void addObject(renderer::parametric_model::PrimitiveKind kind);
+        void removeSelectedObject();
         void setSelectedObject(renderer::parametric_model::ParametricObjectId objectId);
         void setActiveObject(renderer::parametric_model::ParametricObjectId objectId);
         void setSelectedFeature(renderer::parametric_model::ParametricFeatureId featureId);
         void setActiveFeature(renderer::parametric_model::ParametricFeatureId featureId);
         void focusSelectedObject();
-        [[nodiscard]] renderer::parametric_model::BoxSpec boxSpec() const;
-        [[nodiscard]] renderer::parametric_model::CylinderSpec cylinderSpec() const;
-        [[nodiscard]] renderer::parametric_model::SphereSpec sphereSpec() const;
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
         [[nodiscard]] ViewerControlPanel::CameraPanelState cameraPanelState() const;
@@ -126,6 +122,8 @@ private:
         void wheelEvent(QWheelEvent* event) override;
 
     private:
+        struct SceneObject;
+
         [[nodiscard]] renderer::scene_contract::TransformData currentObjectTransform(int index) const;
         [[nodiscard]] viewport_zoom::AnchorSample sampleViewportZoomAnchor(const QPointF& viewportPosition) const;
         void applyViewportZoom(const QPointF& viewportPosition, float deltaDistance);
@@ -133,6 +131,9 @@ private:
         void processPendingModelChange();
         void notifyCameraStateChanged();
         void refreshViewportZoomState();
+        void releaseSceneObjectResources(SceneObject& sceneObject);
+        void uploadSceneObjectResources(SceneObject& sceneObject);
+        void rebuildRepositoryItems();
         void applyFocusBounds(const renderer::scene_contract::Aabb& bounds);
         void applyParametricObjectDescriptor(
             int index,
@@ -191,7 +192,7 @@ private:
             renderer::parametric_model::ParametricFeatureId activeFeatureId = 0U;
         };
 
-        std::array<SceneObject, 3> sceneObjects_ {};
+        std::vector<SceneObject> sceneObjects_;
         SelectionState selectionState_ {};
         renderer::scene_contract::DirectionalLightData light_ {};
         OrbitCameraController cameraController_;

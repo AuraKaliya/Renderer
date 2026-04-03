@@ -18,7 +18,7 @@
 
 namespace {
 
-constexpr std::size_t kSceneObjectCount = 3;
+constexpr std::size_t kDefaultSceneObjectCount = 3;
 constexpr int kDefaultWindowWidth = 1240;
 constexpr int kDefaultWindowHeight = 680;
 
@@ -32,11 +32,56 @@ struct SceneObjectDefaults {
     bool visible = true;
 };
 
-const std::array<SceneObjectDefaults, kSceneObjectCount> kDefaultSceneObjects = {{
+const std::array<SceneObjectDefaults, kDefaultSceneObjectCount> kDefaultSceneObjects = {{
     {{0.15F, 0.55F, 0.85F, 1.0F}, -2.0F, 0.0F, 0.0F, 0.95F, 1.0F, true},
     {{0.92F, 0.54F, 0.21F, 1.0F}, 0.0F, 0.1F, 0.0F, 1.0F, -0.8F, true},
     {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 1.25F, true}
 }};
+
+renderer::parametric_model::PrimitiveDescriptor makeDefaultPrimitiveDescriptor(
+    renderer::parametric_model::PrimitiveKind kind)
+{
+    switch (kind) {
+    case renderer::parametric_model::PrimitiveKind::box:
+        return renderer::parametric_model::PrimitiveFactory::makeBoxDescriptor(1.0F, 1.0F, 1.0F);
+    case renderer::parametric_model::PrimitiveKind::cylinder:
+        return renderer::parametric_model::PrimitiveFactory::makeCylinderDescriptor(0.55F, 1.35F, 32U);
+    case renderer::parametric_model::PrimitiveKind::sphere:
+        return renderer::parametric_model::PrimitiveFactory::makeSphereDescriptor(0.7F, 28U, 18U);
+    }
+
+    return renderer::parametric_model::PrimitiveFactory::makeBoxDescriptor(1.0F, 1.0F, 1.0F);
+}
+
+SceneObjectDefaults makeDynamicSceneObjectDefaults(
+    renderer::parametric_model::PrimitiveKind kind,
+    std::size_t index)
+{
+    if (index < kDefaultSceneObjectCount) {
+        return kDefaultSceneObjects[index];
+    }
+
+    static const std::array<renderer::scene_contract::ColorRgba, 6> kExtraColors = {{
+        {0.86F, 0.33F, 0.28F, 1.0F},
+        {0.24F, 0.72F, 0.88F, 1.0F},
+        {0.92F, 0.76F, 0.28F, 1.0F},
+        {0.48F, 0.80F, 0.42F, 1.0F},
+        {0.84F, 0.48F, 0.78F, 1.0F},
+        {0.55F, 0.60F, 0.90F, 1.0F}
+    }};
+
+    SceneObjectDefaults defaults;
+    defaults.color = kExtraColors[index % kExtraColors.size()];
+    const int column = static_cast<int>(index % 4U);
+    const int row = static_cast<int>(index / 4U);
+    defaults.offsetX = (static_cast<float>(column) - 1.5F) * 2.2F;
+    defaults.offsetY = kind == renderer::parametric_model::PrimitiveKind::cylinder ? 0.1F : 0.0F;
+    defaults.offsetZ = static_cast<float>(row) * 1.8F;
+    defaults.scale = kind == renderer::parametric_model::PrimitiveKind::sphere ? 0.9F : 1.0F;
+    defaults.rotationSpeed = 0.9F + static_cast<float>(index % 5U) * 0.2F;
+    defaults.visible = true;
+    return defaults;
+}
 
 renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObject(
     const renderer::parametric_model::PrimitiveDescriptor& basePrimitive)
@@ -47,7 +92,7 @@ renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObje
     return descriptor;
 }
 
-const std::array<renderer::parametric_model::ParametricObjectDescriptor, kSceneObjectCount> kDefaultParametricObjects = {{
+const std::array<renderer::parametric_model::ParametricObjectDescriptor, kDefaultSceneObjectCount> kDefaultParametricObjects = {{
     makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::box,
         {1.0F, 1.0F, 1.0F},
@@ -338,6 +383,14 @@ void ViewerWindow::bindControlPanelSignals() {
             enabled);
         syncControlPanel();
     });
+    connect(controlPanel_, &ViewerControlPanel::objectAddRequested, this, [this](int primitiveKind) {
+        viewport_->addObject(static_cast<renderer::parametric_model::PrimitiveKind>(primitiveKind));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::deleteSelectedObjectRequested, this, [this]() {
+        viewport_->removeSelectedObject();
+        syncControlPanel();
+    });
     connect(controlPanel_, &ViewerControlPanel::objectSelectionChanged, this, [this](int objectId) {
         viewport_->setSelectedObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
         syncControlPanel();
@@ -442,37 +495,26 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     setFormat(makeFormat());
     setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
-    sceneObjects_[0].parametricObjectDescriptor = kDefaultParametricObjects[0];
-    sceneObjects_[0].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[0].parametricObjectDescriptor);
-    sceneObjects_[0].textureData = makeCheckerTextureData(64, 64, 8U);
-    sceneObjects_[0].materialData.baseColor = kDefaultSceneObjects[0].color;
-    sceneObjects_[0].materialData.useBaseColorTexture = true;
-    sceneObjects_[0].offsetX = kDefaultSceneObjects[0].offsetX;
-    sceneObjects_[0].offsetY = kDefaultSceneObjects[0].offsetY;
-    sceneObjects_[0].offsetZ = kDefaultSceneObjects[0].offsetZ;
-    sceneObjects_[0].scale = kDefaultSceneObjects[0].scale;
-    sceneObjects_[0].rotationSpeed = kDefaultSceneObjects[0].rotationSpeed;
-    sceneObjects_[0].visible = kDefaultSceneObjects[0].visible;
+    sceneObjects_.resize(kDefaultSceneObjectCount);
+    for (std::size_t index = 0; index < kDefaultSceneObjectCount; ++index) {
+        auto& sceneObject = sceneObjects_[index];
+        const auto& defaults = kDefaultSceneObjects[index];
 
-    sceneObjects_[1].parametricObjectDescriptor = kDefaultParametricObjects[1];
-    sceneObjects_[1].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[1].parametricObjectDescriptor);
-    sceneObjects_[1].materialData.baseColor = kDefaultSceneObjects[1].color;
-    sceneObjects_[1].offsetX = kDefaultSceneObjects[1].offsetX;
-    sceneObjects_[1].offsetY = kDefaultSceneObjects[1].offsetY;
-    sceneObjects_[1].offsetZ = kDefaultSceneObjects[1].offsetZ;
-    sceneObjects_[1].scale = kDefaultSceneObjects[1].scale;
-    sceneObjects_[1].rotationSpeed = kDefaultSceneObjects[1].rotationSpeed;
-    sceneObjects_[1].visible = kDefaultSceneObjects[1].visible;
+        sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
+        sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+        sceneObject.materialData.baseColor = defaults.color;
+        sceneObject.offsetX = defaults.offsetX;
+        sceneObject.offsetY = defaults.offsetY;
+        sceneObject.offsetZ = defaults.offsetZ;
+        sceneObject.scale = defaults.scale;
+        sceneObject.rotationSpeed = defaults.rotationSpeed;
+        sceneObject.visible = defaults.visible;
 
-    sceneObjects_[2].parametricObjectDescriptor = kDefaultParametricObjects[2];
-    sceneObjects_[2].meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObjects_[2].parametricObjectDescriptor);
-    sceneObjects_[2].materialData.baseColor = kDefaultSceneObjects[2].color;
-    sceneObjects_[2].offsetX = kDefaultSceneObjects[2].offsetX;
-    sceneObjects_[2].offsetY = kDefaultSceneObjects[2].offsetY;
-    sceneObjects_[2].offsetZ = kDefaultSceneObjects[2].offsetZ;
-    sceneObjects_[2].scale = kDefaultSceneObjects[2].scale;
-    sceneObjects_[2].rotationSpeed = kDefaultSceneObjects[2].rotationSpeed;
-    sceneObjects_[2].visible = kDefaultSceneObjects[2].visible;
+        if (index == 0U) {
+            sceneObject.textureData = makeCheckerTextureData(64, 64, 8U);
+            sceneObject.materialData.useBaseColorTexture = true;
+        }
+    }
 
     light_ = kDefaultLight;
     model_change_view::setViewStrategy(modelChangeViewState_, model_change_view::ViewStrategy::keep_view);
@@ -505,12 +547,22 @@ void ViewerWindow::Viewport::resetDefaults() {
     cameraController_.setYawRadians(0.0F);
     viewport_zoom::reset(viewportZoomState_);
 
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    const bool canTouchRenderer = renderer_.isInitialized() && context() != nullptr;
+    if (canTouchRenderer) {
+        makeCurrent();
+        for (auto& sceneObject : sceneObjects_) {
+            releaseSceneObjectResources(sceneObject);
+        }
+    }
+
+    sceneObjects_.clear();
+    sceneObjects_.resize(kDefaultSceneObjectCount);
+    for (std::size_t index = 0; index < kDefaultSceneObjectCount; ++index) {
         const auto& defaults = kDefaultSceneObjects[index];
         auto& sceneObject = sceneObjects_[index];
-
+        sceneObject = {};
         sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
-        rebuildObjectMesh(index);
+        sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
         sceneObject.offsetY = defaults.offsetY;
@@ -519,44 +571,41 @@ void ViewerWindow::Viewport::resetDefaults() {
         sceneObject.rotationSpeed = defaults.rotationSpeed;
         sceneObject.visible = defaults.visible;
 
-        if (renderer_.isInitialized() &&
-            sceneObject.materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
-            renderer_.updateMaterial(sceneObject.materialHandle, sceneObject.materialData);
+        if (index == 0U) {
+            sceneObject.textureData = makeCheckerTextureData(64, 64, 8U);
+            sceneObject.materialData.useBaseColorTexture = true;
+        }
+
+        if (canTouchRenderer) {
+            uploadSceneObjectResources(sceneObject);
         }
     }
+    if (canTouchRenderer) {
+        doneCurrent();
+    }
 
+    rebuildRepositoryItems();
+
+    if (!sceneObjects_.empty()) {
+        selectionState_.selectedObjectId = sceneObjects_.front().parametricObjectDescriptor.metadata.id;
+        selectionState_.activeObjectId = selectionState_.selectedObjectId;
+        selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
+        selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
+    }
     normalizeSelectionState();
     refreshViewportZoomState();
+    notifyCameraStateChanged();
     update();
 }
 
 void ViewerWindow::Viewport::applySphereFocusPreset() {
+    resetDefaults();
     light_ = kSphereFocusLight;
     cameraController_.setProjection(kSphereFocusVerticalFovDegrees, kDefaultNearPlane, kDefaultFarPlane);
     cameraController_.setProjectionMode(OrbitCameraController::ProjectionMode::perspective);
     cameraController_.setPitchRadians(kDefaultCameraPitchRadians);
     cameraController_.setYawRadians(0.0F);
     viewport_zoom::reset(viewportZoomState_);
-
-    for (int index = 0; index < kSceneObjectCount; ++index) {
-        auto& sceneObject = sceneObjects_[index];
-        const auto& defaults = kDefaultSceneObjects[index];
-
-        sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
-        rebuildObjectMesh(index);
-        sceneObject.materialData.baseColor = defaults.color;
-        sceneObject.offsetX = defaults.offsetX;
-        sceneObject.offsetY = defaults.offsetY;
-        sceneObject.offsetZ = defaults.offsetZ;
-        sceneObject.scale = defaults.scale;
-        sceneObject.rotationSpeed = defaults.rotationSpeed;
-        sceneObject.visible = defaults.visible;
-
-        if (renderer_.isInitialized() &&
-            sceneObject.materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
-            renderer_.updateMaterial(sceneObject.materialHandle, sceneObject.materialData);
-        }
-    }
 
     sceneObjects_[0].visible = false;
     sceneObjects_[0].rotationSpeed = 0.0F;
@@ -573,11 +622,18 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
         sceneObjects_[2].offsetZ
     });
 
-    if (renderer_.isInitialized() &&
-        sceneObjects_[2].materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
+    if (renderer_.isInitialized()
+        && context() != nullptr
+        && sceneObjects_[2].materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
+        makeCurrent();
         renderer_.updateMaterial(sceneObjects_[2].materialHandle, sceneObjects_[2].materialData);
+        doneCurrent();
     }
 
+    selectionState_.selectedObjectId = sceneObjects_[2].parametricObjectDescriptor.metadata.id;
+    selectionState_.activeObjectId = selectionState_.selectedObjectId;
+    selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
+    selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
     normalizeSelectionState();
     updateSceneTransforms();
     cameraController_.focusOnBounds(objectFocusBounds(2));
@@ -590,7 +646,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
 }
 
 void ViewerWindow::Viewport::setObjectVisible(int index, bool visible) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -601,14 +657,14 @@ void ViewerWindow::Viewport::setObjectVisible(int index, bool visible) {
 }
 
 bool ViewerWindow::Viewport::objectVisible(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return false;
     }
     return sceneObjects_[index].visible;
 }
 
 void ViewerWindow::Viewport::setObjectRotationSpeed(int index, float speed) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -617,14 +673,14 @@ void ViewerWindow::Viewport::setObjectRotationSpeed(int index, float speed) {
 }
 
 float ViewerWindow::Viewport::objectRotationSpeed(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return 0.0F;
     }
     return sceneObjects_[index].rotationSpeed;
 }
 
 void ViewerWindow::Viewport::setObjectColor(int index, const renderer::scene_contract::ColorRgba& color) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -640,7 +696,7 @@ void ViewerWindow::Viewport::setObjectColor(int index, const renderer::scene_con
 }
 
 renderer::scene_contract::ColorRgba ViewerWindow::Viewport::objectColor(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return {};
     }
     return sceneObjects_[index].materialData.baseColor;
@@ -727,129 +783,151 @@ float ViewerWindow::Viewport::orthographicHeight() const {
 }
 
 void ViewerWindow::Viewport::setBoxWidth(float width) {
-    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
-    primitive->box.width = width;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(0, descriptor);
-}
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
 
-float ViewerWindow::Viewport::boxWidth() const {
-    const auto* primitive = findObjectPrimitive(sceneObjects_[0].parametricObjectDescriptor);
-    return primitive != nullptr ? primitive->box.width : 0.0F;
+    primitive->box.width = width;
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setBoxHeight(float height) {
-    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
     primitive->box.height = height;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(0, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setBoxDepth(float depth) {
-    auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
     primitive->box.depth = depth;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(0, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderRadius(float radius) {
-    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
     primitive->cylinder.radius = radius;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(1, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderHeight(float height) {
-    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
     primitive->cylinder.height = height;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(1, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderSegments(std::uint32_t segments) {
-    auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
     primitive->cylinder.segments = segments;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(1, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereRadius(float radius) {
-    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
     primitive->sphere.radius = radius;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(2, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereSlices(std::uint32_t slices) {
-    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
     primitive->sphere.slices = slices;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(2, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereStacks(std::uint32_t stacks) {
-    auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    auto* primitive = ensureObjectPrimitive(descriptor);
-    if (primitive == nullptr) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
         return;
     }
 
-    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
     primitive->sphere.stacks = stacks;
-    descriptor.metadata.objectKind = primitive->kind;
-    applyParametricObjectDescriptor(2, descriptor);
+    applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
 void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -864,7 +942,7 @@ void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
 }
 
 void ViewerWindow::Viewport::setObjectMirrorAxis(int index, renderer::parametric_model::Axis axis) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -879,7 +957,7 @@ void ViewerWindow::Viewport::setObjectMirrorAxis(int index, renderer::parametric
 }
 
 void ViewerWindow::Viewport::setObjectMirrorPlaneOffset(int index, float planeOffset) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -894,7 +972,7 @@ void ViewerWindow::Viewport::setObjectMirrorPlaneOffset(int index, float planeOf
 }
 
 void ViewerWindow::Viewport::setObjectLinearArrayEnabled(int index, bool enabled) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -909,7 +987,7 @@ void ViewerWindow::Viewport::setObjectLinearArrayEnabled(int index, bool enabled
 }
 
 void ViewerWindow::Viewport::setObjectLinearArrayCount(int index, std::uint32_t count) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -927,7 +1005,7 @@ void ViewerWindow::Viewport::setObjectLinearArrayOffset(
     int index,
     const renderer::scene_contract::Vec3f& offset)
 {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -942,7 +1020,7 @@ void ViewerWindow::Viewport::setObjectLinearArrayOffset(
 }
 
 void ViewerWindow::Viewport::addObjectFeature(int index, renderer::parametric_model::FeatureKind kind) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -970,7 +1048,7 @@ void ViewerWindow::Viewport::removeObjectFeature(
     int index,
     renderer::parametric_model::ParametricFeatureId featureId)
 {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -994,7 +1072,7 @@ void ViewerWindow::Viewport::setObjectFeatureEnabled(
     renderer::parametric_model::ParametricFeatureId featureId,
     bool enabled)
 {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -1009,6 +1087,76 @@ void ViewerWindow::Viewport::setObjectFeatureEnabled(
 
     feature->enabled = enabled;
     applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::addObject(renderer::parametric_model::PrimitiveKind kind) {
+    SceneObject sceneObject;
+    const std::size_t newObjectIndex = sceneObjects_.size();
+    const auto defaults = makeDynamicSceneObjectDefaults(kind, newObjectIndex);
+
+    sceneObject.parametricObjectDescriptor = makeDefaultParametricObject(makeDefaultPrimitiveDescriptor(kind));
+    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+    sceneObject.materialData.baseColor = defaults.color;
+    sceneObject.offsetX = defaults.offsetX;
+    sceneObject.offsetY = defaults.offsetY;
+    sceneObject.offsetZ = defaults.offsetZ;
+    sceneObject.scale = defaults.scale;
+    sceneObject.rotationSpeed = defaults.rotationSpeed;
+    sceneObject.visible = defaults.visible;
+
+    if (renderer_.isInitialized() && context() != nullptr) {
+        makeCurrent();
+        uploadSceneObjectResources(sceneObject);
+        doneCurrent();
+    }
+
+    sceneObjects_.push_back(std::move(sceneObject));
+    rebuildRepositoryItems();
+
+    selectionState_.selectedObjectId = sceneObjects_.back().parametricObjectDescriptor.metadata.id;
+    selectionState_.activeObjectId = selectionState_.selectedObjectId;
+    selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
+    selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
+    normalizeSelectionState();
+    markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
+    processPendingModelChange();
+    update();
+}
+
+void ViewerWindow::Viewport::removeSelectedObject() {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    const int fallbackIndexBeforeErase =
+        sceneObjects_.size() <= 1U
+            ? -1
+            : std::min(objectIndex, static_cast<int>(sceneObjects_.size()) - 2);
+
+    if (renderer_.isInitialized() && context() != nullptr) {
+        makeCurrent();
+        releaseSceneObjectResources(sceneObjects_[objectIndex]);
+        doneCurrent();
+    }
+
+    sceneObjects_.erase(sceneObjects_.begin() + objectIndex);
+    rebuildRepositoryItems();
+    if (fallbackIndexBeforeErase >= 0 && fallbackIndexBeforeErase < static_cast<int>(sceneObjects_.size())) {
+        selectionState_.selectedObjectId = sceneObjects_[fallbackIndexBeforeErase].parametricObjectDescriptor.metadata.id;
+        selectionState_.activeObjectId = selectionState_.selectedObjectId;
+        selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
+        selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
+    } else {
+        selectionState_.selectedObjectId = 0U;
+        selectionState_.activeObjectId = 0U;
+        selectionState_.selectedFeatureId = 0U;
+        selectionState_.activeFeatureId = 0U;
+    }
+    normalizeSelectionState();
+    markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
+    processPendingModelChange();
+    update();
 }
 
 void ViewerWindow::Viewport::setSelectedObject(renderer::parametric_model::ParametricObjectId objectId) {
@@ -1058,21 +1206,6 @@ void ViewerWindow::Viewport::focusSelectedObject() {
     update();
 }
 
-renderer::parametric_model::BoxSpec ViewerWindow::Viewport::boxSpec() const {
-    const auto* primitive = findObjectPrimitive(sceneObjects_[0].parametricObjectDescriptor);
-    return primitive != nullptr ? primitive->box : renderer::parametric_model::BoxSpec {};
-}
-
-renderer::parametric_model::CylinderSpec ViewerWindow::Viewport::cylinderSpec() const {
-    const auto* primitive = findObjectPrimitive(sceneObjects_[1].parametricObjectDescriptor);
-    return primitive != nullptr ? primitive->cylinder : renderer::parametric_model::CylinderSpec {};
-}
-
-renderer::parametric_model::SphereSpec ViewerWindow::Viewport::sphereSpec() const {
-    const auto* primitive = findObjectPrimitive(sceneObjects_[2].parametricObjectDescriptor);
-    return primitive != nullptr ? primitive->sphere : renderer::parametric_model::SphereSpec {};
-}
-
 float ViewerWindow::Viewport::nearPlane() const {
     return cameraController_.nearPlane();
 }
@@ -1096,12 +1229,17 @@ ViewerControlPanel::CameraPanelState ViewerWindow::Viewport::cameraPanelState() 
 
 ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const {
     ViewerControlPanel::PanelState state;
+    state.objects.resize(sceneObjects_.size());
 
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         auto& objectState = state.objects[index];
         const auto& descriptor = sceneObjects_[index].parametricObjectDescriptor;
         objectState.id = descriptor.metadata.id;
         objectState.primitiveKind = descriptor.metadata.objectKind;
+        const auto* primitive = findObjectPrimitive(descriptor);
+        if (primitive != nullptr) {
+            objectState.primitive = *primitive;
+        }
         objectState.visible = objectVisible(index);
         objectState.rotationSpeed = objectRotationSpeed(index);
         objectState.color = objectColor(index);
@@ -1145,9 +1283,6 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
     state.selection.activeFeatureId = selectionState_.activeFeatureId;
     state.modelChangeViewStrategy =
         modelChangeViewStrategy() == model_change_view::ViewStrategy::auto_frame ? 1 : 0;
-    state.box = boxSpec();
-    state.cylinder = cylinderSpec();
-    state.sphere = sphereSpec();
     return state;
 }
 
@@ -1296,7 +1431,7 @@ void ViewerWindow::Viewport::focusOnScene() {
 }
 
 renderer::scene_contract::Aabb ViewerWindow::Viewport::objectLocalBounds(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return {};
     }
 
@@ -1310,18 +1445,7 @@ ViewerWindow::Viewport::~Viewport() {
 
     makeCurrent();
     for (auto& sceneObject : sceneObjects_) {
-        if (sceneObject.meshHandle != renderer::scene_contract::kInvalidMeshHandle) {
-            renderer_.releaseMesh(sceneObject.meshHandle);
-            sceneObject.meshHandle = renderer::scene_contract::kInvalidMeshHandle;
-        }
-        if (sceneObject.materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
-            renderer_.releaseMaterial(sceneObject.materialHandle);
-            sceneObject.materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
-        }
-        if (sceneObject.textureHandle != renderer::scene_contract::kInvalidTextureHandle) {
-            renderer_.releaseTexture(sceneObject.textureHandle);
-            sceneObject.textureHandle = renderer::scene_contract::kInvalidTextureHandle;
-        }
+        releaseSceneObjectResources(sceneObject);
     }
     renderer_.shutdown();
     doneCurrent();
@@ -1333,34 +1457,11 @@ void ViewerWindow::Viewport::initializeGL() {
         qWarning() << "Failed to initialize render_gl:" << QString::fromStdString(renderer_.lastError());
     } else {
         for (auto& sceneObject : sceneObjects_) {
-            if (!sceneObject.textureData.pixels.empty()) {
-                sceneObject.textureHandle = renderer_.uploadTexture(sceneObject.textureData);
-                if (sceneObject.textureHandle == renderer::scene_contract::kInvalidTextureHandle) {
-                    qWarning() << "Failed to upload scene texture:" << QString::fromStdString(renderer_.lastError());
-                } else {
-                    sceneObject.materialData.baseColorTexture = sceneObject.textureHandle;
-                }
-            }
-
-            sceneObject.meshHandle = renderer_.uploadMesh(sceneObject.meshData);
-            if (sceneObject.meshHandle == renderer::scene_contract::kInvalidMeshHandle) {
-                qWarning() << "Failed to upload scene mesh:" << QString::fromStdString(renderer_.lastError());
-            }
-
-            sceneObject.materialHandle = renderer_.uploadMaterial(sceneObject.materialData);
-            if (sceneObject.materialHandle == renderer::scene_contract::kInvalidMaterialHandle) {
-                qWarning() << "Failed to upload scene material:" << QString::fromStdString(renderer_.lastError());
-            }
+            uploadSceneObjectResources(sceneObject);
         }
     }
 
-    for (auto& sceneObject : sceneObjects_) {
-        auto item = makeItem();
-        item.meshHandle = sceneObject.meshHandle;
-        item.materialHandle = sceneObject.materialHandle;
-        sceneObject.itemId = repository_.add(item);
-        repository_.updateLocalBounds(sceneObject.itemId, sceneObject.meshData.localBounds);
-    }
+    rebuildRepositoryItems();
     cameraController_.setViewportSize(width(), height());
     rebuildFramePacket();
 }
@@ -1527,7 +1628,7 @@ void ViewerWindow::Viewport::wheelEvent(QWheelEvent* event) {
 }
 
 renderer::scene_contract::TransformData ViewerWindow::Viewport::currentObjectTransform(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return {};
     }
 
@@ -1552,6 +1653,74 @@ void ViewerWindow::Viewport::refreshViewportZoomState() {
     viewportZoomState_.zoomOperationKind = viewport_zoom::chooseZoomOperationKind(
         projectionMode() == OrbitCameraController::ProjectionMode::orthographic,
         zoomMode() == OrbitCameraController::ZoomMode::lens);
+}
+
+void ViewerWindow::Viewport::releaseSceneObjectResources(SceneObject& sceneObject) {
+    if (!renderer_.isInitialized()) {
+        sceneObject.meshHandle = renderer::scene_contract::kInvalidMeshHandle;
+        sceneObject.materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
+        sceneObject.textureHandle = renderer::scene_contract::kInvalidTextureHandle;
+        sceneObject.materialData.baseColorTexture = renderer::scene_contract::kInvalidTextureHandle;
+        sceneObject.materialData.useBaseColorTexture = false;
+        return;
+    }
+
+    if (sceneObject.meshHandle != renderer::scene_contract::kInvalidMeshHandle) {
+        renderer_.releaseMesh(sceneObject.meshHandle);
+        sceneObject.meshHandle = renderer::scene_contract::kInvalidMeshHandle;
+    }
+    if (sceneObject.materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
+        renderer_.releaseMaterial(sceneObject.materialHandle);
+        sceneObject.materialHandle = renderer::scene_contract::kInvalidMaterialHandle;
+    }
+    if (sceneObject.textureHandle != renderer::scene_contract::kInvalidTextureHandle) {
+        renderer_.releaseTexture(sceneObject.textureHandle);
+        sceneObject.textureHandle = renderer::scene_contract::kInvalidTextureHandle;
+    }
+    sceneObject.materialData.baseColorTexture = renderer::scene_contract::kInvalidTextureHandle;
+    sceneObject.materialData.useBaseColorTexture = false;
+}
+
+void ViewerWindow::Viewport::uploadSceneObjectResources(SceneObject& sceneObject) {
+    if (!renderer_.isInitialized()) {
+        return;
+    }
+
+    sceneObject.textureHandle = renderer::scene_contract::kInvalidTextureHandle;
+    sceneObject.materialData.baseColorTexture = renderer::scene_contract::kInvalidTextureHandle;
+    sceneObject.materialData.useBaseColorTexture = false;
+
+    if (!sceneObject.textureData.pixels.empty()) {
+        sceneObject.textureHandle = renderer_.uploadTexture(sceneObject.textureData);
+        if (sceneObject.textureHandle == renderer::scene_contract::kInvalidTextureHandle) {
+            qWarning() << "Failed to upload scene texture:" << QString::fromStdString(renderer_.lastError());
+        } else {
+            sceneObject.materialData.baseColorTexture = sceneObject.textureHandle;
+            sceneObject.materialData.useBaseColorTexture = true;
+        }
+    }
+
+    sceneObject.meshHandle = renderer_.uploadMesh(sceneObject.meshData);
+    if (sceneObject.meshHandle == renderer::scene_contract::kInvalidMeshHandle) {
+        qWarning() << "Failed to upload scene mesh:" << QString::fromStdString(renderer_.lastError());
+    }
+
+    sceneObject.materialHandle = renderer_.uploadMaterial(sceneObject.materialData);
+    if (sceneObject.materialHandle == renderer::scene_contract::kInvalidMaterialHandle) {
+        qWarning() << "Failed to upload scene material:" << QString::fromStdString(renderer_.lastError());
+    }
+}
+
+void ViewerWindow::Viewport::rebuildRepositoryItems() {
+    repository_.clear();
+    for (auto& sceneObject : sceneObjects_) {
+        auto item = makeItem();
+        item.meshHandle = sceneObject.meshHandle;
+        item.materialHandle = sceneObject.materialHandle;
+        sceneObject.itemId = repository_.add(item);
+        repository_.updateLocalBounds(sceneObject.itemId, sceneObject.meshData.localBounds);
+    }
+    updateSceneTransforms();
 }
 
 void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aabb& bounds) {
@@ -1652,7 +1821,7 @@ const renderer::parametric_model::PrimitiveDescriptor* ViewerWindow::Viewport::f
 }
 
 int ViewerWindow::Viewport::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         if (sceneObjects_[index].parametricObjectDescriptor.metadata.id == objectId) {
             return index;
         }
@@ -1688,10 +1857,16 @@ renderer::parametric_model::ParametricFeatureId ViewerWindow::Viewport::firstFea
 }
 
 void ViewerWindow::Viewport::normalizeSelectionState() {
+    if (sceneObjects_.empty()) {
+        selectionState_.selectedObjectId = 0U;
+        selectionState_.activeObjectId = 0U;
+        selectionState_.selectedFeatureId = 0U;
+        selectionState_.activeFeatureId = 0U;
+        return;
+    }
+
     if (selectionState_.selectedObjectId == 0U || findObjectIndexById(selectionState_.selectedObjectId) < 0) {
-        if (!sceneObjects_.empty()) {
-            selectionState_.selectedObjectId = sceneObjects_.front().parametricObjectDescriptor.metadata.id;
-        }
+        selectionState_.selectedObjectId = sceneObjects_.front().parametricObjectDescriptor.metadata.id;
     }
 
     if (selectionState_.activeObjectId == 0U || findObjectIndexById(selectionState_.activeObjectId) < 0) {
@@ -1715,7 +1890,7 @@ void ViewerWindow::Viewport::applyParametricObjectDescriptor(
     int index,
     const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
 {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -1728,7 +1903,7 @@ void ViewerWindow::Viewport::applyParametricObjectDescriptor(
 }
 
 void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
     }
 
@@ -1760,7 +1935,7 @@ void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
 }
 
 void ViewerWindow::Viewport::updateSceneTransforms() {
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         auto& sceneObject = sceneObjects_[index];
         repository_.updateTransform(
             sceneObject.itemId,
@@ -1770,7 +1945,7 @@ void ViewerWindow::Viewport::updateSceneTransforms() {
 
 renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleFocusBounds() const {
     renderer::scene_contract::Aabb bounds;
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         if (!sceneObjects_[index].visible) {
             continue;
         }
@@ -1793,7 +1968,7 @@ renderer::scene_contract::Aabb ViewerWindow::Viewport::visibleSceneWorldBounds()
 }
 
 renderer::scene_contract::Aabb ViewerWindow::Viewport::objectFocusBounds(int index) const {
-    if (index < 0 || index >= kSceneObjectCount) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return {};
     }
 

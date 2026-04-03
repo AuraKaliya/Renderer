@@ -1,9 +1,13 @@
 #include "viewer_control_panel.h"
 
-#include <QGroupBox>
+#include <algorithm>
+
 #include <QCheckBox>
-#include <QLabel>
 #include <QComboBox>
+#include <QFrame>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollArea>
@@ -84,17 +88,17 @@ QString featureKindText(renderer::parametric_model::FeatureKind kind) {
     return QStringLiteral("Unknown");
 }
 
+QString inspectorTitleForObject(const ViewerControlPanel::SceneObjectPanelState& objectState) {
+    return QStringLiteral("%1 Object [id:%2]")
+        .arg(primitiveKindText(objectState.primitiveKind))
+        .arg(objectState.id);
+}
+
 }  // namespace
 
 ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     : QWidget(parent)
 {
-    static const std::array<const char*, kSceneObjectCount> kObjectNames = {
-        "Box",
-        "Cylinder",
-        "Sphere"
-    };
-
     setFixedWidth(320);
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -115,21 +119,52 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     auto* explorerGroup = new QGroupBox("Object Explorer", sceneTab.content);
     auto* explorerLayout = new QVBoxLayout(explorerGroup);
 
+    auto* addRow = new QHBoxLayout();
+    addBoxObjectButton_ = new QPushButton("Add Box", explorerGroup);
+    addCylinderObjectButton_ = new QPushButton("Add Cylinder", explorerGroup);
+    addSphereObjectButton_ = new QPushButton("Add Sphere", explorerGroup);
+    connect(addBoxObjectButton_, &QPushButton::clicked, this, [this]() {
+        emit objectAddRequested(static_cast<int>(renderer::parametric_model::PrimitiveKind::box));
+    });
+    connect(addCylinderObjectButton_, &QPushButton::clicked, this, [this]() {
+        emit objectAddRequested(static_cast<int>(renderer::parametric_model::PrimitiveKind::cylinder));
+    });
+    connect(addSphereObjectButton_, &QPushButton::clicked, this, [this]() {
+        emit objectAddRequested(static_cast<int>(renderer::parametric_model::PrimitiveKind::sphere));
+    });
+    addRow->addWidget(addBoxObjectButton_);
+    addRow->addWidget(addCylinderObjectButton_);
+    addRow->addWidget(addSphereObjectButton_);
+    explorerLayout->addLayout(addRow);
+
     explorerLayout->addWidget(new QLabel("Objects", explorerGroup));
 
     objectListWidget_ = new QListWidget(explorerGroup);
     objectListWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
     connect(objectListWidget_, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (row < 0 || row >= kSceneObjectCount) {
+        if (row < 0 || row >= static_cast<int>(panelState_.objects.size())) {
+            inspectedObjectIndex_ = -1;
+            inspectedFeatureId_ = 0U;
+            refreshFeatureExplorer();
+            refreshObjectInspector();
+            updateFeatureActionState();
             return;
         }
 
         inspectedObjectIndex_ = row;
         inspectedFeatureId_ = 0U;
         refreshFeatureExplorer();
+        refreshObjectInspector();
+        updateFeatureActionState();
         emit objectSelectionChanged(static_cast<int>(panelState_.objects[inspectedObjectIndex_].id));
     });
     explorerLayout->addWidget(objectListWidget_);
+
+    deleteSelectedObjectButton_ = new QPushButton("Delete Selected Object", explorerGroup);
+    connect(deleteSelectedObjectButton_, &QPushButton::clicked, this, [this]() {
+        emit deleteSelectedObjectRequested();
+    });
+    explorerLayout->addWidget(deleteSelectedObjectButton_);
 
     objectSelectionLabel_ = new QLabel(explorerGroup);
     objectSelectionLabel_->setWordWrap(true);
@@ -138,10 +173,11 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     activateObjectButton_ = new QPushButton("Activate Selected Object", explorerGroup);
     connect(activateObjectButton_, &QPushButton::clicked, this, [this]() {
-        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+        const auto* objectState = currentObjectState();
+        if (objectState == nullptr) {
             return;
         }
-        emit objectActivationRequested(static_cast<int>(panelState_.objects[inspectedObjectIndex_].id));
+        emit objectActivationRequested(static_cast<int>(objectState->id));
     });
     explorerLayout->addWidget(activateObjectButton_);
 
@@ -156,7 +192,8 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     featureListWidget_ = new QListWidget(explorerGroup);
     featureListWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
     connect(featureListWidget_, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (row < 0) {
+        const auto* objectState = currentObjectState();
+        if (row < 0 || objectState == nullptr) {
             inspectedFeatureId_ = 0U;
             updateFeatureActionState();
             return;
@@ -173,7 +210,7 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
             item->data(Qt::UserRole).toUInt());
         updateFeatureActionState();
         emit featureSelectionChanged(
-            static_cast<int>(panelState_.objects[inspectedObjectIndex_].id),
+            static_cast<int>(objectState->id),
             static_cast<int>(inspectedFeatureId_));
     });
     explorerLayout->addWidget(featureListWidget_);
@@ -185,24 +222,26 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     activateFeatureButton_ = new QPushButton("Activate Selected Feature", explorerGroup);
     connect(activateFeatureButton_, &QPushButton::clicked, this, [this]() {
-        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount || inspectedFeatureId_ == 0U) {
+        const auto* objectState = currentObjectState();
+        if (objectState == nullptr || inspectedFeatureId_ == 0U) {
             return;
         }
 
         emit featureActivationRequested(
-            static_cast<int>(panelState_.objects[inspectedObjectIndex_].id),
+            static_cast<int>(objectState->id),
             static_cast<int>(inspectedFeatureId_));
     });
     explorerLayout->addWidget(activateFeatureButton_);
 
     featureEnabledCheckBox_ = new QCheckBox("Selected Feature Enabled", explorerGroup);
     connect(featureEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
-        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+        const int objectIndex = currentObjectIndex();
+        const auto* objectState = currentObjectState();
+        if (objectIndex < 0 || objectState == nullptr) {
             return;
         }
 
-        const auto& objectState = panelState_.objects[inspectedObjectIndex_];
-        for (const auto& feature : objectState.features) {
+        for (const auto& feature : objectState->features) {
             if (feature.id != inspectedFeatureId_) {
                 continue;
             }
@@ -214,7 +253,7 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
             }
 
             emit objectFeatureEnabledChanged(
-                inspectedObjectIndex_,
+                objectIndex,
                 static_cast<int>(feature.id),
                 checked);
             return;
@@ -224,99 +263,151 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     addMirrorFeatureButton_ = new QPushButton("Add Mirror Feature", explorerGroup);
     connect(addMirrorFeatureButton_, &QPushButton::clicked, this, [this]() {
+        const int objectIndex = currentObjectIndex();
+        if (objectIndex < 0) {
+            return;
+        }
         emit objectFeatureAddRequested(
-            inspectedObjectIndex_,
+            objectIndex,
             static_cast<int>(renderer::parametric_model::FeatureKind::mirror));
     });
     explorerLayout->addWidget(addMirrorFeatureButton_);
 
     addLinearArrayFeatureButton_ = new QPushButton("Add Linear Array Feature", explorerGroup);
     connect(addLinearArrayFeatureButton_, &QPushButton::clicked, this, [this]() {
+        const int objectIndex = currentObjectIndex();
+        if (objectIndex < 0) {
+            return;
+        }
         emit objectFeatureAddRequested(
-            inspectedObjectIndex_,
+            objectIndex,
             static_cast<int>(renderer::parametric_model::FeatureKind::linear_array));
     });
     explorerLayout->addWidget(addLinearArrayFeatureButton_);
 
     removeFeatureButton_ = new QPushButton("Remove Selected Feature", explorerGroup);
     connect(removeFeatureButton_, &QPushButton::clicked, this, [this]() {
+        const int objectIndex = currentObjectIndex();
+        if (objectIndex < 0 || inspectedFeatureId_ == 0U) {
+            return;
+        }
         emit objectFeatureRemoveRequested(
-            inspectedObjectIndex_,
+            objectIndex,
             static_cast<int>(inspectedFeatureId_));
     });
     explorerLayout->addWidget(removeFeatureButton_);
 
     sceneTab.contentLayout->addWidget(explorerGroup);
 
-    for (int index = 0; index < kSceneObjectCount; ++index) {
-        const auto primitiveKind =
-            index == 0
-                ? SceneObjectControlWidget::PrimitivePanelKind::box
-                : (index == 1
-                       ? SceneObjectControlWidget::PrimitivePanelKind::cylinder
-                       : SceneObjectControlWidget::PrimitivePanelKind::sphere);
+    objectWidgets_[0] = new SceneObjectControlWidget(
+        "Box Object",
+        SceneObjectControlWidget::PrimitivePanelKind::box,
+        sceneTab.content);
+    objectWidgets_[1] = new SceneObjectControlWidget(
+        "Cylinder Object",
+        SceneObjectControlWidget::PrimitivePanelKind::cylinder,
+        sceneTab.content);
+    objectWidgets_[2] = new SceneObjectControlWidget(
+        "Sphere Object",
+        SceneObjectControlWidget::PrimitivePanelKind::sphere,
+        sceneTab.content);
 
-        auto* objectWidget = new SceneObjectControlWidget(
-            QString::fromLatin1(kObjectNames[index]),
-            primitiveKind,
-            sceneTab.content);
-        connect(objectWidget, &SceneObjectControlWidget::visibleChanged, this, [this, index](bool visible) {
-            emit objectVisibleChanged(index, visible);
+    for (auto* objectWidget : objectWidgets_) {
+        objectWidget->hide();
+
+        connect(objectWidget, &SceneObjectControlWidget::visibleChanged, this, [this](bool visible) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectVisibleChanged(objectIndex, visible);
         });
-        connect(objectWidget, &SceneObjectControlWidget::rotationSpeedChanged, this, [this, index](float speed) {
-            emit objectRotationSpeedChanged(index, speed);
+        connect(objectWidget, &SceneObjectControlWidget::rotationSpeedChanged, this, [this](float speed) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectRotationSpeedChanged(objectIndex, speed);
         });
-        connect(objectWidget, &SceneObjectControlWidget::colorChanged, this, [this, index](float red, float green, float blue) {
-            emit objectColorChanged(index, red, green, blue);
+        connect(objectWidget, &SceneObjectControlWidget::colorChanged, this, [this](float red, float green, float blue) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectColorChanged(objectIndex, red, green, blue);
         });
-        connect(objectWidget, &SceneObjectControlWidget::boxWidthChanged, this, [this](float width) {
-            emit boxWidthChanged(width);
+        connect(objectWidget, &SceneObjectControlWidget::mirrorEnabledChanged, this, [this](bool enabled) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectMirrorEnabledChanged(objectIndex, enabled);
         });
-        connect(objectWidget, &SceneObjectControlWidget::boxHeightChanged, this, [this](float height) {
-            emit boxHeightChanged(height);
+        connect(objectWidget, &SceneObjectControlWidget::mirrorAxisChanged, this, [this](int axis) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectMirrorAxisChanged(objectIndex, axis);
         });
-        connect(objectWidget, &SceneObjectControlWidget::boxDepthChanged, this, [this](float depth) {
-            emit boxDepthChanged(depth);
+        connect(objectWidget, &SceneObjectControlWidget::mirrorPlaneOffsetChanged, this, [this](float planeOffset) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectMirrorPlaneOffsetChanged(objectIndex, planeOffset);
         });
-        connect(objectWidget, &SceneObjectControlWidget::cylinderRadiusChanged, this, [this](float radius) {
-            emit cylinderRadiusChanged(radius);
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayEnabledChanged, this, [this](bool enabled) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectLinearArrayEnabledChanged(objectIndex, enabled);
         });
-        connect(objectWidget, &SceneObjectControlWidget::cylinderHeightChanged, this, [this](float height) {
-            emit cylinderHeightChanged(height);
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayCountChanged, this, [this](int count) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectLinearArrayCountChanged(objectIndex, count);
         });
-        connect(objectWidget, &SceneObjectControlWidget::cylinderSegmentsChanged, this, [this](int segments) {
-            emit cylinderSegmentsChanged(segments);
+        connect(objectWidget, &SceneObjectControlWidget::linearArrayOffsetChanged, this, [this](float x, float y, float z) {
+            const int objectIndex = currentObjectIndex();
+            if (objectIndex < 0) {
+                return;
+            }
+            emit objectLinearArrayOffsetChanged(objectIndex, x, y, z);
         });
-        connect(objectWidget, &SceneObjectControlWidget::sphereRadiusChanged, this, [this](float radius) {
-            emit sphereRadiusChanged(radius);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::sphereSlicesChanged, this, [this](int slices) {
-            emit sphereSlicesChanged(slices);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::sphereStacksChanged, this, [this](int stacks) {
-            emit sphereStacksChanged(stacks);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::mirrorEnabledChanged, this, [this, index](bool enabled) {
-            emit objectMirrorEnabledChanged(index, enabled);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::mirrorAxisChanged, this, [this, index](int axis) {
-            emit objectMirrorAxisChanged(index, axis);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::mirrorPlaneOffsetChanged, this, [this, index](float planeOffset) {
-            emit objectMirrorPlaneOffsetChanged(index, planeOffset);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::linearArrayEnabledChanged, this, [this, index](bool enabled) {
-            emit objectLinearArrayEnabledChanged(index, enabled);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::linearArrayCountChanged, this, [this, index](int count) {
-            emit objectLinearArrayCountChanged(index, count);
-        });
-        connect(objectWidget, &SceneObjectControlWidget::linearArrayOffsetChanged, this, [this, index](float x, float y, float z) {
-            emit objectLinearArrayOffsetChanged(index, x, y, z);
-        });
-        objectWidgets_[index] = objectWidget;
         sceneTab.contentLayout->addWidget(objectWidget);
     }
+
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxWidthChanged, this, [this](float width) {
+        emit boxWidthChanged(width);
+    });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxHeightChanged, this, [this](float height) {
+        emit boxHeightChanged(height);
+    });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxDepthChanged, this, [this](float depth) {
+        emit boxDepthChanged(depth);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderRadiusChanged, this, [this](float radius) {
+        emit cylinderRadiusChanged(radius);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderHeightChanged, this, [this](float height) {
+        emit cylinderHeightChanged(height);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderSegmentsChanged, this, [this](int segments) {
+        emit cylinderSegmentsChanged(segments);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereRadiusChanged, this, [this](float radius) {
+        emit sphereRadiusChanged(radius);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereSlicesChanged, this, [this](int slices) {
+        emit sphereSlicesChanged(slices);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereStacksChanged, this, [this](int stacks) {
+        emit sphereStacksChanged(stacks);
+    });
 
     lightingWidget_ = new LightingControlWidget(sceneTab.content);
     connect(lightingWidget_, &LightingControlWidget::ambientStrengthChanged, this, [this](float strength) {
@@ -361,24 +452,6 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
                 modelChangeViewStrategyComboBox_->itemData(index).toInt());
         });
 
-    auto* boundsGroup = new QGroupBox("Bounds", debugTab.content);
-    auto* boundsLayout = new QVBoxLayout(boundsGroup);
-    for (int index = 0; index < kSceneObjectCount; ++index) {
-        auto* label = new QLabel(boundsGroup);
-        label->setWordWrap(true);
-        label->setTextFormat(Qt::PlainText);
-        objectBoundsLabels_[index] = label;
-        boundsLayout->addWidget(label);
-    }
-
-    auto* debugActionGroup = new QGroupBox("Debug Actions", debugTab.content);
-    auto* debugActionLayout = new QVBoxLayout(debugActionGroup);
-
-    auto* resetButton = new QPushButton("Reset Defaults", debugActionGroup);
-    connect(resetButton, &QPushButton::clicked, this, [this]() {
-        emit resetDefaultsRequested();
-    });
-
     auto* sphereFocusButton = new QPushButton("Focus Sphere", cameraActionGroup);
     connect(sphereFocusButton, &QPushButton::clicked, this, [this]() {
         emit focusSphereRequested();
@@ -394,6 +467,19 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     cameraActionLayout->addWidget(sphereFocusButton);
     cameraActionLayout->addWidget(focusAllButton);
 
+    auto* boundsGroup = new QGroupBox("Bounds", debugTab.content);
+    auto* boundsLayout = new QVBoxLayout(boundsGroup);
+    boundsListWidget_ = new QListWidget(boundsGroup);
+    boundsListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    boundsLayout->addWidget(boundsListWidget_);
+
+    auto* debugActionGroup = new QGroupBox("Debug Actions", debugTab.content);
+    auto* debugActionLayout = new QVBoxLayout(debugActionGroup);
+
+    auto* resetButton = new QPushButton("Reset Defaults", debugActionGroup);
+    connect(resetButton, &QPushButton::clicked, this, [this]() {
+        emit resetDefaultsRequested();
+    });
     debugActionLayout->addWidget(resetButton);
 
     sceneTab.contentLayout->addWidget(lightingWidget_);
@@ -409,6 +495,9 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     refreshObjectExplorer();
     refreshFeatureExplorer();
+    refreshObjectInspector();
+    refreshBoundsList();
+    updateFeatureActionState();
 }
 
 void ViewerControlPanel::setPanelState(const PanelState& state) {
@@ -416,18 +505,12 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
     const int selectedObjectIndex = findObjectIndexById(panelState_.selection.selectedObjectId);
     if (selectedObjectIndex >= 0) {
         inspectedObjectIndex_ = selectedObjectIndex;
-    } else if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+    } else if (panelState_.objects.empty()) {
+        inspectedObjectIndex_ = -1;
+    } else if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= static_cast<int>(panelState_.objects.size())) {
         inspectedObjectIndex_ = 0;
     }
     inspectedFeatureId_ = panelState_.selection.selectedFeatureId;
-
-    for (int index = 0; index < kSceneObjectCount; ++index) {
-        const auto& object = state.objects[index];
-        setObjectState(index, object.visible, object.rotationSpeed, object.color);
-        setObjectPrimitiveState(index, state);
-        setObjectOperatorState(index, object.mirror, object.linearArray);
-        setObjectBounds(index, object.bounds);
-    }
 
     setLightingState(state.lighting.ambientStrength, state.lighting.lightDirection);
     setCameraState(state.camera);
@@ -441,61 +524,9 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
 
     refreshObjectExplorer();
     refreshFeatureExplorer();
-}
-
-void ViewerControlPanel::setObjectState(
-    int index,
-    bool visible,
-    float rotationSpeed,
-    const renderer::scene_contract::ColorRgba& color)
-{
-    if (index < 0 || index >= kSceneObjectCount) {
-        return;
-    }
-    objectWidgets_[index]->setObjectState(visible, rotationSpeed, color);
-}
-
-void ViewerControlPanel::setObjectOperatorState(
-    int index,
-    const SceneObjectControlWidget::MirrorState& mirror,
-    const SceneObjectControlWidget::LinearArrayState& linearArray)
-{
-    if (index < 0 || index >= kSceneObjectCount) {
-        return;
-    }
-
-    objectWidgets_[index]->setOperatorState(mirror, linearArray);
-}
-
-void ViewerControlPanel::setObjectPrimitiveState(int index, const PanelState& state) {
-    if (index < 0 || index >= kSceneObjectCount) {
-        return;
-    }
-
-    if (index == 0) {
-        objectWidgets_[index]->setBoxSpec(state.box);
-        return;
-    }
-    if (index == 1) {
-        objectWidgets_[index]->setCylinderSpec(state.cylinder);
-        return;
-    }
-
-    objectWidgets_[index]->setSphereSpec(state.sphere);
-}
-
-void ViewerControlPanel::setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds) {
-    if (index < 0 || index >= kSceneObjectCount) {
-        return;
-    }
-
-    static const std::array<const char*, kSceneObjectCount> kObjectNames = {
-        "Box",
-        "Cylinder",
-        "Sphere"
-    };
-
-    objectBoundsLabels_[index]->setText(formatBoundsText(QString::fromLatin1(kObjectNames[index]), bounds));
+    refreshObjectInspector();
+    refreshBoundsList();
+    updateFeatureActionState();
 }
 
 void ViewerControlPanel::setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection) {
@@ -522,7 +553,7 @@ void ViewerControlPanel::refreshObjectExplorer() {
     const QSignalBlocker blocker(objectListWidget_);
     objectListWidget_->clear();
 
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(panelState_.objects.size()); ++index) {
         const auto& object = panelState_.objects[index];
         const bool isSelected = object.id == panelState_.selection.selectedObjectId;
         const bool isActive = object.id == panelState_.selection.activeObjectId;
@@ -538,32 +569,47 @@ void ViewerControlPanel::refreshObjectExplorer() {
         item->setData(Qt::UserRole, index);
     }
 
+    if (panelState_.objects.empty()) {
+        objectListWidget_->setCurrentRow(-1);
+        inspectedObjectIndex_ = -1;
+        return;
+    }
+
+    if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= static_cast<int>(panelState_.objects.size())) {
+        inspectedObjectIndex_ = 0;
+    }
     objectListWidget_->setCurrentRow(inspectedObjectIndex_);
 }
 
 void ViewerControlPanel::refreshFeatureExplorer() {
-    if (featureListWidget_ == nullptr || inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+    if (featureListWidget_ == nullptr) {
         return;
     }
 
-    const auto& object = panelState_.objects[inspectedObjectIndex_];
+    const auto* objectState = currentObjectState();
+    const QSignalBlocker blocker(featureListWidget_);
+    featureListWidget_->clear();
+
+    if (objectState == nullptr) {
+        inspectedFeatureId_ = 0U;
+        updateFeatureActionState();
+        return;
+    }
+
     bool hasSelectedFeature = false;
-    for (const auto& feature : object.features) {
+    for (const auto& feature : objectState->features) {
         if (feature.id == inspectedFeatureId_) {
             hasSelectedFeature = true;
             break;
         }
     }
     if (!hasSelectedFeature) {
-        inspectedFeatureId_ = object.features.empty() ? 0U : object.features.front().id;
+        inspectedFeatureId_ = objectState->features.empty() ? 0U : objectState->features.front().id;
     }
 
-    const QSignalBlocker blocker(featureListWidget_);
-    featureListWidget_->clear();
-
     int selectedRow = -1;
-    for (int row = 0; row < static_cast<int>(object.features.size()); ++row) {
-        const auto& feature = object.features[static_cast<std::size_t>(row)];
+    for (int row = 0; row < static_cast<int>(objectState->features.size()); ++row) {
+        const auto& feature = objectState->features[static_cast<std::size_t>(row)];
         const bool isSelected = feature.id == panelState_.selection.selectedFeatureId;
         const bool isActive = feature.id == panelState_.selection.activeFeatureId;
         auto* item = new QListWidgetItem(
@@ -584,27 +630,105 @@ void ViewerControlPanel::refreshFeatureExplorer() {
     updateFeatureActionState();
 }
 
+void ViewerControlPanel::refreshObjectInspector() {
+    for (auto* objectWidget : objectWidgets_) {
+        if (objectWidget != nullptr) {
+            objectWidget->hide();
+        }
+    }
+
+    const auto* objectState = currentObjectState();
+    auto* objectWidget = currentInspectorWidget();
+    if (objectState == nullptr || objectWidget == nullptr) {
+        return;
+    }
+
+    objectWidget->setTitle(inspectorTitleForObject(*objectState));
+    objectWidget->setObjectState(objectState->visible, objectState->rotationSpeed, objectState->color);
+    objectWidget->setOperatorState(objectState->mirror, objectState->linearArray);
+
+    switch (objectState->primitive.kind) {
+    case renderer::parametric_model::PrimitiveKind::box:
+        objectWidget->setBoxSpec(objectState->primitive.box);
+        break;
+    case renderer::parametric_model::PrimitiveKind::cylinder:
+        objectWidget->setCylinderSpec(objectState->primitive.cylinder);
+        break;
+    case renderer::parametric_model::PrimitiveKind::sphere:
+        objectWidget->setSphereSpec(objectState->primitive.sphere);
+        break;
+    }
+
+    objectWidget->show();
+}
+
+void ViewerControlPanel::refreshBoundsList() {
+    if (boundsListWidget_ == nullptr) {
+        return;
+    }
+
+    const QSignalBlocker blocker(boundsListWidget_);
+    boundsListWidget_->clear();
+
+    for (int index = 0; index < static_cast<int>(panelState_.objects.size()); ++index) {
+        const auto& object = panelState_.objects[index];
+        boundsListWidget_->addItem(formatBoundsText(
+            QStringLiteral("%1. %2 [id:%3]")
+                .arg(index + 1)
+                .arg(primitiveKindText(object.primitiveKind))
+                .arg(object.id),
+            object.bounds));
+    }
+}
+
 void ViewerControlPanel::updateFeatureActionState() {
-    if (featureEnabledCheckBox_ == nullptr
-        || objectSelectionLabel_ == nullptr
+    if (objectSelectionLabel_ == nullptr
         || featureSelectionLabel_ == nullptr
+        || featureEnabledCheckBox_ == nullptr
         || activateObjectButton_ == nullptr
+        || deleteSelectedObjectButton_ == nullptr
         || activateFeatureButton_ == nullptr
         || focusSelectedObjectButton_ == nullptr
         || addMirrorFeatureButton_ == nullptr
         || addLinearArrayFeatureButton_ == nullptr
-        || removeFeatureButton_ == nullptr
-        || inspectedObjectIndex_ < 0
-        || inspectedObjectIndex_ >= kSceneObjectCount) {
+        || removeFeatureButton_ == nullptr) {
         return;
     }
 
-    const auto& object = panelState_.objects[inspectedObjectIndex_];
+    const auto* objectState = currentObjectState();
+    const bool hasObject = objectState != nullptr;
+    activateObjectButton_->setEnabled(
+        hasObject
+        && panelState_.selection.selectedObjectId != 0U
+        && panelState_.selection.selectedObjectId != panelState_.selection.activeObjectId);
+    deleteSelectedObjectButton_->setEnabled(hasObject);
+    focusSelectedObjectButton_->setEnabled(panelState_.selection.selectedObjectId != 0U);
+    objectSelectionLabel_->setText(
+        QStringLiteral("Selected Object: %1\nActive Object: %2")
+            .arg(panelState_.selection.selectedObjectId != 0U
+                     ? QString::number(panelState_.selection.selectedObjectId)
+                     : QStringLiteral("none"))
+            .arg(panelState_.selection.activeObjectId != 0U
+                     ? QString::number(panelState_.selection.activeObjectId)
+                     : QStringLiteral("none")));
+
+    if (!hasObject) {
+        const QSignalBlocker blocker(featureEnabledCheckBox_);
+        featureEnabledCheckBox_->setChecked(false);
+        featureEnabledCheckBox_->setEnabled(false);
+        activateFeatureButton_->setEnabled(false);
+        addMirrorFeatureButton_->setEnabled(false);
+        addLinearArrayFeatureButton_->setEnabled(false);
+        removeFeatureButton_->setEnabled(false);
+        featureSelectionLabel_->setText(QStringLiteral("Selected Feature: none\nActive Feature: none"));
+        return;
+    }
+
     bool hasMirrorFeature = false;
     bool hasLinearArrayFeature = false;
     const FeaturePanelState* selectedFeature = nullptr;
 
-    for (const auto& feature : object.features) {
+    for (const auto& feature : objectState->features) {
         if (feature.kind == renderer::parametric_model::FeatureKind::mirror) {
             hasMirrorFeature = true;
         }
@@ -618,16 +742,8 @@ void ViewerControlPanel::updateFeatureActionState() {
 
     addMirrorFeatureButton_->setEnabled(!hasMirrorFeature);
     addLinearArrayFeatureButton_->setEnabled(!hasLinearArrayFeature);
-    activateObjectButton_->setEnabled(
-        panelState_.selection.selectedObjectId != 0U
-        && panelState_.selection.selectedObjectId != panelState_.selection.activeObjectId);
-    focusSelectedObjectButton_->setEnabled(panelState_.selection.selectedObjectId != 0U);
 
     const QSignalBlocker blocker(featureEnabledCheckBox_);
-    objectSelectionLabel_->setText(
-        QStringLiteral("Selected Object: %1\nActive Object: %2")
-            .arg(panelState_.selection.selectedObjectId)
-            .arg(panelState_.selection.activeObjectId));
     if (selectedFeature == nullptr) {
         featureEnabledCheckBox_->setChecked(false);
         featureEnabledCheckBox_->setEnabled(false);
@@ -635,14 +751,20 @@ void ViewerControlPanel::updateFeatureActionState() {
         removeFeatureButton_->setEnabled(false);
         featureSelectionLabel_->setText(
             QStringLiteral("Selected Feature: none\nActive Feature: %1")
-                .arg(panelState_.selection.activeFeatureId));
+                .arg(panelState_.selection.activeFeatureId != 0U
+                         ? QString::number(panelState_.selection.activeFeatureId)
+                         : QStringLiteral("none")));
         return;
     }
 
     featureSelectionLabel_->setText(
         QStringLiteral("Selected Feature: %1\nActive Feature: %2")
-            .arg(panelState_.selection.selectedFeatureId)
-            .arg(panelState_.selection.activeFeatureId));
+            .arg(panelState_.selection.selectedFeatureId != 0U
+                     ? QString::number(panelState_.selection.selectedFeatureId)
+                     : QStringLiteral("none"))
+            .arg(panelState_.selection.activeFeatureId != 0U
+                     ? QString::number(panelState_.selection.activeFeatureId)
+                     : QStringLiteral("none")));
     featureEnabledCheckBox_->setChecked(selectedFeature->enabled);
     const bool removable = selectedFeature->kind != renderer::parametric_model::FeatureKind::primitive;
     featureEnabledCheckBox_->setEnabled(removable);
@@ -653,10 +775,43 @@ void ViewerControlPanel::updateFeatureActionState() {
 }
 
 int ViewerControlPanel::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {
-    for (int index = 0; index < kSceneObjectCount; ++index) {
+    for (int index = 0; index < static_cast<int>(panelState_.objects.size()); ++index) {
         if (panelState_.objects[index].id == objectId) {
             return index;
         }
     }
     return -1;
+}
+
+int ViewerControlPanel::currentObjectIndex() const {
+    if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= static_cast<int>(panelState_.objects.size())) {
+        return -1;
+    }
+    return inspectedObjectIndex_;
+}
+
+const ViewerControlPanel::SceneObjectPanelState* ViewerControlPanel::currentObjectState() const {
+    const int objectIndex = currentObjectIndex();
+    if (objectIndex < 0) {
+        return nullptr;
+    }
+    return &panelState_.objects[objectIndex];
+}
+
+SceneObjectControlWidget* ViewerControlPanel::currentInspectorWidget() const {
+    const auto* objectState = currentObjectState();
+    if (objectState == nullptr) {
+        return nullptr;
+    }
+
+    switch (objectState->primitive.kind) {
+    case renderer::parametric_model::PrimitiveKind::box:
+        return objectWidgets_[0];
+    case renderer::parametric_model::PrimitiveKind::cylinder:
+        return objectWidgets_[1];
+    case renderer::parametric_model::PrimitiveKind::sphere:
+        return objectWidgets_[2];
+    }
+
+    return nullptr;
 }

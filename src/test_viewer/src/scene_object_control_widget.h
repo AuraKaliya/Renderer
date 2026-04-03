@@ -8,6 +8,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGroupBox;
 class QSpinBox;
 
 class SceneObjectControlWidget final : public QWidget {
@@ -37,6 +38,7 @@ public:
         PrimitivePanelKind primitiveKind,
         QWidget* parent = nullptr);
 
+    void setTitle(const QString& title);
     void setObjectState(bool visible, float rotationSpeed, const renderer::scene_contract::ColorRgba& color);
     void setOperatorState(const MirrorState& mirror, const LinearArrayState& linearArray);
     void setBoxSpec(const renderer::parametric_model::BoxSpec& spec);
@@ -65,6 +67,7 @@ signals:
 
 private:
     PrimitivePanelKind primitiveKind_;
+    QGroupBox* groupBox_ = nullptr;
     QCheckBox* visibleCheckBox_ = nullptr;
     QDoubleSpinBox* speedSpinBox_ = nullptr;
     QDoubleSpinBox* redSpinBox_ = nullptr;

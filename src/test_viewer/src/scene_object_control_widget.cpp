@@ -37,34 +37,34 @@ SceneObjectControlWidget::SceneObjectControlWidget(
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
 
-    auto* group = new QGroupBox(title, this);
-    auto* groupLayout = new QVBoxLayout(group);
+    groupBox_ = new QGroupBox(title, this);
+    auto* groupLayout = new QVBoxLayout(groupBox_);
 
-    auto* objectGroup = new QGroupBox("Object", group);
+    auto* objectGroup = new QGroupBox("Object", groupBox_);
     auto* objectLayout = new QFormLayout(objectGroup);
 
-    auto* appearanceGroup = new QGroupBox("Appearance", group);
+    auto* appearanceGroup = new QGroupBox("Appearance", groupBox_);
     auto* appearanceLayout = new QFormLayout(appearanceGroup);
 
-    auto* primitiveGroup = new QGroupBox("Primitive", group);
+    auto* primitiveGroup = new QGroupBox("Primitive", groupBox_);
     auto* primitiveLayout = new QFormLayout(primitiveGroup);
 
-    auto* operatorGroup = new QGroupBox("Operators", group);
+    auto* operatorGroup = new QGroupBox("Operators", groupBox_);
     auto* operatorLayout = new QFormLayout(operatorGroup);
 
-    visibleCheckBox_ = new QCheckBox(group);
+    visibleCheckBox_ = new QCheckBox(groupBox_);
     connect(visibleCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         emit visibleChanged(checked);
     });
 
-    speedSpinBox_ = makeFloatSpinBox(group, -5.0, 5.0, 0.05, 2);
+    speedSpinBox_ = makeFloatSpinBox(groupBox_, -5.0, 5.0, 0.05, 2);
     connect(speedSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         emit rotationSpeedChanged(static_cast<float>(value));
     });
 
-    redSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
-    greenSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
-    blueSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
+    redSpinBox_ = makeFloatSpinBox(groupBox_, 0.0, 1.0, 0.05, 2);
+    greenSpinBox_ = makeFloatSpinBox(groupBox_, 0.0, 1.0, 0.05, 2);
+    blueSpinBox_ = makeFloatSpinBox(groupBox_, 0.0, 1.0, 0.05, 2);
 
     auto emitColor = [this]() {
         emit colorChanged(
@@ -91,9 +91,9 @@ SceneObjectControlWidget::SceneObjectControlWidget(
     appearanceLayout->addRow("Blue", blueSpinBox_);
 
     if (primitiveKind_ == PrimitivePanelKind::box) {
-        boxWidthSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
-        boxHeightSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
-        boxDepthSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        boxWidthSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        boxHeightSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        boxDepthSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
 
         connect(boxWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
             emit boxWidthChanged(static_cast<float>(value));
@@ -109,9 +109,9 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         primitiveLayout->addRow("Height", boxHeightSpinBox_);
         primitiveLayout->addRow("Depth", boxDepthSpinBox_);
     } else if (primitiveKind_ == PrimitivePanelKind::cylinder) {
-        cylinderRadiusSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
-        cylinderHeightSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
-        cylinderSegmentsSpinBox_ = new QSpinBox(group);
+        cylinderRadiusSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        cylinderHeightSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        cylinderSegmentsSpinBox_ = new QSpinBox(groupBox_);
         cylinderSegmentsSpinBox_->setRange(3, 128);
         cylinderSegmentsSpinBox_->setSingleStep(1);
 
@@ -129,11 +129,11 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         primitiveLayout->addRow("Height", cylinderHeightSpinBox_);
         primitiveLayout->addRow("Segments", cylinderSegmentsSpinBox_);
     } else {
-        sphereRadiusSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
-        sphereSlicesSpinBox_ = new QSpinBox(group);
+        sphereRadiusSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        sphereSlicesSpinBox_ = new QSpinBox(groupBox_);
         sphereSlicesSpinBox_->setRange(3, 128);
         sphereSlicesSpinBox_->setSingleStep(1);
-        sphereStacksSpinBox_ = new QSpinBox(group);
+        sphereStacksSpinBox_ = new QSpinBox(groupBox_);
         sphereStacksSpinBox_->setRange(2, 128);
         sphereStacksSpinBox_->setSingleStep(1);
 
@@ -152,12 +152,12 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         primitiveLayout->addRow("Stacks", sphereStacksSpinBox_);
     }
 
-    mirrorEnabledCheckBox_ = new QCheckBox(group);
+    mirrorEnabledCheckBox_ = new QCheckBox(groupBox_);
     connect(mirrorEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         emit mirrorEnabledChanged(checked);
     });
 
-    mirrorAxisComboBox_ = new QComboBox(group);
+    mirrorAxisComboBox_ = new QComboBox(groupBox_);
     mirrorAxisComboBox_->addItem("X", static_cast<int>(renderer::parametric_model::Axis::x));
     mirrorAxisComboBox_->addItem("Y", static_cast<int>(renderer::parametric_model::Axis::y));
     mirrorAxisComboBox_->addItem("Z", static_cast<int>(renderer::parametric_model::Axis::z));
@@ -165,25 +165,25 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         emit mirrorAxisChanged(mirrorAxisComboBox_->itemData(index).toInt());
     });
 
-    mirrorPlaneOffsetSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
+    mirrorPlaneOffsetSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
     connect(mirrorPlaneOffsetSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         emit mirrorPlaneOffsetChanged(static_cast<float>(value));
     });
 
-    linearArrayEnabledCheckBox_ = new QCheckBox(group);
+    linearArrayEnabledCheckBox_ = new QCheckBox(groupBox_);
     connect(linearArrayEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         emit linearArrayEnabledChanged(checked);
     });
 
-    linearArrayCountSpinBox_ = new QSpinBox(group);
+    linearArrayCountSpinBox_ = new QSpinBox(groupBox_);
     linearArrayCountSpinBox_->setRange(1, 64);
     connect(linearArrayCountSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
         emit linearArrayCountChanged(value);
     });
 
-    linearArrayOffsetXSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
-    linearArrayOffsetYSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
-    linearArrayOffsetZSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
+    linearArrayOffsetXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+    linearArrayOffsetYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+    linearArrayOffsetZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
 
     auto emitLinearArrayOffset = [this]() {
         emit linearArrayOffsetChanged(
@@ -215,7 +215,15 @@ SceneObjectControlWidget::SceneObjectControlWidget(
     groupLayout->addWidget(appearanceGroup);
     groupLayout->addWidget(primitiveGroup);
     groupLayout->addWidget(operatorGroup);
-    rootLayout->addWidget(group);
+    rootLayout->addWidget(groupBox_);
+}
+
+void SceneObjectControlWidget::setTitle(const QString& title) {
+    if (groupBox_ == nullptr) {
+        return;
+    }
+
+    groupBox_->setTitle(title);
 }
 
 void SceneObjectControlWidget::setObjectState(
