@@ -38,29 +38,12 @@ const std::array<SceneObjectDefaults, kSceneObjectCount> kDefaultSceneObjects = 
     {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 1.25F, true}
 }};
 
-renderer::parametric_model::OperatorDescriptor makeMirrorOperatorDescriptor() {
-    renderer::parametric_model::OperatorDescriptor descriptor;
-    descriptor.kind = renderer::parametric_model::OperatorKind::mirror;
-    descriptor.enabled = false;
-    descriptor.mirror.axis = renderer::parametric_model::Axis::x;
-    return descriptor;
-}
-
-renderer::parametric_model::OperatorDescriptor makeLinearArrayOperatorDescriptor() {
-    renderer::parametric_model::OperatorDescriptor descriptor;
-    descriptor.kind = renderer::parametric_model::OperatorKind::linear_array;
-    descriptor.enabled = false;
-    descriptor.linearArray.count = 1U;
-    descriptor.linearArray.offset = {1.0F, 0.0F, 0.0F};
-    return descriptor;
-}
-
 renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObject(
     const renderer::parametric_model::PrimitiveDescriptor& basePrimitive)
 {
     auto descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricObject(basePrimitive);
-    descriptor.operators.push_back(makeMirrorOperatorDescriptor());
-    descriptor.operators.push_back(makeLinearArrayOperatorDescriptor());
+    descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeMirrorFeature());
+    descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeLinearArrayFeature());
     return descriptor;
 }
 
@@ -338,6 +321,45 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::objectLinearArrayOffsetChanged, this, [this](int index, float x, float y, float z) {
         viewport_->setObjectLinearArrayOffset(index, {x, y, z});
     });
+    connect(controlPanel_, &ViewerControlPanel::objectFeatureAddRequested, this, [this](int index, int featureKind) {
+        viewport_->addObjectFeature(index, static_cast<renderer::parametric_model::FeatureKind>(featureKind));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectFeatureRemoveRequested, this, [this](int index, int featureId) {
+        viewport_->removeObjectFeature(
+            index,
+            static_cast<renderer::parametric_model::ParametricFeatureId>(featureId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectFeatureEnabledChanged, this, [this](int index, int featureId, bool enabled) {
+        viewport_->setObjectFeatureEnabled(
+            index,
+            static_cast<renderer::parametric_model::ParametricFeatureId>(featureId),
+            enabled);
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectSelectionChanged, this, [this](int objectId) {
+        viewport_->setSelectedObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectActivationRequested, this, [this](int objectId) {
+        viewport_->setActiveObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::featureSelectionChanged, this, [this](int objectId, int featureId) {
+        viewport_->setSelectedObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
+        viewport_->setSelectedFeature(static_cast<renderer::parametric_model::ParametricFeatureId>(featureId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::featureActivationRequested, this, [this](int objectId, int featureId) {
+        viewport_->setActiveObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
+        viewport_->setActiveFeature(static_cast<renderer::parametric_model::ParametricFeatureId>(featureId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::focusSelectedObjectRequested, this, [this]() {
+        viewport_->focusSelectedObject();
+        syncControlPanel();
+    });
     connect(controlPanel_, &ViewerControlPanel::ambientStrengthChanged, this, [this](float strength) {
         viewport_->setAmbientStrength(strength);
     });
@@ -462,6 +484,7 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
     cameraController_.setYawRadians(0.0F);
     viewport_zoom::reset(viewportZoomState_);
     refreshViewportZoomState();
+    normalizeSelectionState();
 
     animationClock_.start();
 
@@ -502,6 +525,7 @@ void ViewerWindow::Viewport::resetDefaults() {
         }
     }
 
+    normalizeSelectionState();
     refreshViewportZoomState();
     update();
 }
@@ -554,6 +578,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
         renderer_.updateMaterial(sceneObjects_[2].materialHandle, sceneObjects_[2].materialData);
     }
 
+    normalizeSelectionState();
     updateSceneTransforms();
     cameraController_.focusOnBounds(objectFocusBounds(2));
     refreshViewportZoomState();
@@ -703,68 +728,123 @@ float ViewerWindow::Viewport::orthographicHeight() const {
 
 void ViewerWindow::Viewport::setBoxWidth(float width) {
     auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.basePrimitive.box.width = width;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
+    primitive->box.width = width;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(0, descriptor);
 }
 
 float ViewerWindow::Viewport::boxWidth() const {
-    return sceneObjects_[0].parametricObjectDescriptor.basePrimitive.box.width;
+    const auto* primitive = findObjectPrimitive(sceneObjects_[0].parametricObjectDescriptor);
+    return primitive != nullptr ? primitive->box.width : 0.0F;
 }
 
 void ViewerWindow::Viewport::setBoxHeight(float height) {
     auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.basePrimitive.box.height = height;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
+    primitive->box.height = height;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(0, descriptor);
 }
 
 void ViewerWindow::Viewport::setBoxDepth(float depth) {
     auto descriptor = sceneObjects_[0].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::box;
-    descriptor.basePrimitive.box.depth = depth;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::box;
+    primitive->box.depth = depth;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(0, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderRadius(float radius) {
     auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.basePrimitive.cylinder.radius = radius;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    primitive->cylinder.radius = radius;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderHeight(float height) {
     auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.basePrimitive.cylinder.height = height;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    primitive->cylinder.height = height;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setCylinderSegments(std::uint32_t segments) {
     auto descriptor = sceneObjects_[1].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::cylinder;
-    descriptor.basePrimitive.cylinder.segments = segments;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::cylinder;
+    primitive->cylinder.segments = segments;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(1, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereRadius(float radius) {
     auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.basePrimitive.sphere.radius = radius;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    primitive->sphere.radius = radius;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(2, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereSlices(std::uint32_t slices) {
     auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.basePrimitive.sphere.slices = slices;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    primitive->sphere.slices = slices;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(2, descriptor);
 }
 
 void ViewerWindow::Viewport::setSphereStacks(std::uint32_t stacks) {
     auto descriptor = sceneObjects_[2].parametricObjectDescriptor;
-    descriptor.basePrimitive.kind = renderer::parametric_model::PrimitiveKind::sphere;
-    descriptor.basePrimitive.sphere.stacks = stacks;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr) {
+        return;
+    }
+
+    primitive->kind = renderer::parametric_model::PrimitiveKind::sphere;
+    primitive->sphere.stacks = stacks;
+    descriptor.metadata.objectKind = primitive->kind;
     applyParametricObjectDescriptor(2, descriptor);
 }
 
@@ -774,12 +854,12 @@ void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
-    if (mirrorOperator == nullptr) {
+    auto* mirrorFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::mirror);
+    if (mirrorFeature == nullptr) {
         return;
     }
 
-    mirrorOperator->enabled = enabled;
+    mirrorFeature->enabled = enabled;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
@@ -789,12 +869,12 @@ void ViewerWindow::Viewport::setObjectMirrorAxis(int index, renderer::parametric
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
-    if (mirrorOperator == nullptr) {
+    auto* mirrorFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::mirror);
+    if (mirrorFeature == nullptr) {
         return;
     }
 
-    mirrorOperator->mirror.axis = axis;
+    mirrorFeature->mirror.axis = axis;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
@@ -804,12 +884,12 @@ void ViewerWindow::Viewport::setObjectMirrorPlaneOffset(int index, float planeOf
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* mirrorOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::mirror);
-    if (mirrorOperator == nullptr) {
+    auto* mirrorFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::mirror);
+    if (mirrorFeature == nullptr) {
         return;
     }
 
-    mirrorOperator->mirror.planeOffset = planeOffset;
+    mirrorFeature->mirror.planeOffset = planeOffset;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
@@ -819,12 +899,12 @@ void ViewerWindow::Viewport::setObjectLinearArrayEnabled(int index, bool enabled
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
-    if (linearArrayOperator == nullptr) {
+    auto* linearArrayFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::linear_array);
+    if (linearArrayFeature == nullptr) {
         return;
     }
 
-    linearArrayOperator->enabled = enabled;
+    linearArrayFeature->enabled = enabled;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
@@ -834,12 +914,12 @@ void ViewerWindow::Viewport::setObjectLinearArrayCount(int index, std::uint32_t 
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
-    if (linearArrayOperator == nullptr) {
+    auto* linearArrayFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::linear_array);
+    if (linearArrayFeature == nullptr) {
         return;
     }
 
-    linearArrayOperator->linearArray.count = count;
+    linearArrayFeature->linearArray.count = count;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
@@ -852,25 +932,145 @@ void ViewerWindow::Viewport::setObjectLinearArrayOffset(
     }
 
     auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
-    auto* linearArrayOperator = ensureObjectOperator(descriptor, renderer::parametric_model::OperatorKind::linear_array);
-    if (linearArrayOperator == nullptr) {
+    auto* linearArrayFeature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::linear_array);
+    if (linearArrayFeature == nullptr) {
         return;
     }
 
-    linearArrayOperator->linearArray.offset = offset;
+    linearArrayFeature->linearArray.offset = offset;
     applyParametricObjectDescriptor(index, descriptor);
 }
 
+void ViewerWindow::Viewport::addObjectFeature(int index, renderer::parametric_model::FeatureKind kind) {
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    if (kind == renderer::parametric_model::FeatureKind::primitive) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    if (findObjectFeature(descriptor, kind) != nullptr) {
+        return;
+    }
+
+    auto* feature = ensureObjectFeature(descriptor, kind);
+    if (feature == nullptr) {
+        return;
+    }
+
+    if (kind != renderer::parametric_model::FeatureKind::primitive) {
+        feature->enabled = false;
+    }
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::removeObjectFeature(
+    int index,
+    renderer::parametric_model::ParametricFeatureId featureId)
+{
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    for (auto featureIt = descriptor.features.begin(); featureIt != descriptor.features.end(); ++featureIt) {
+        if (featureIt->id != featureId) {
+            continue;
+        }
+        if (featureIt->kind == renderer::parametric_model::FeatureKind::primitive) {
+            return;
+        }
+
+        descriptor.features.erase(featureIt);
+        applyParametricObjectDescriptor(index, descriptor);
+        return;
+    }
+}
+
+void ViewerWindow::Viewport::setObjectFeatureEnabled(
+    int index,
+    renderer::parametric_model::ParametricFeatureId featureId,
+    bool enabled)
+{
+    if (index < 0 || index >= kSceneObjectCount) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* feature = findObjectFeatureById(descriptor, featureId);
+    if (feature == nullptr) {
+        return;
+    }
+    if (feature->kind == renderer::parametric_model::FeatureKind::primitive) {
+        return;
+    }
+
+    feature->enabled = enabled;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
+void ViewerWindow::Viewport::setSelectedObject(renderer::parametric_model::ParametricObjectId objectId) {
+    if (findObjectIndexById(objectId) < 0) {
+        return;
+    }
+
+    selectionState_.selectedObjectId = objectId;
+    normalizeSelectionState();
+}
+
+void ViewerWindow::Viewport::setActiveObject(renderer::parametric_model::ParametricObjectId objectId) {
+    if (findObjectIndexById(objectId) < 0) {
+        return;
+    }
+
+    selectionState_.activeObjectId = objectId;
+    normalizeSelectionState();
+}
+
+void ViewerWindow::Viewport::setSelectedFeature(renderer::parametric_model::ParametricFeatureId featureId) {
+    if (!featureBelongsToObject(selectionState_.selectedObjectId, featureId)) {
+        return;
+    }
+
+    selectionState_.selectedFeatureId = featureId;
+    normalizeSelectionState();
+}
+
+void ViewerWindow::Viewport::setActiveFeature(renderer::parametric_model::ParametricFeatureId featureId) {
+    if (!featureBelongsToObject(selectionState_.activeObjectId, featureId)) {
+        return;
+    }
+
+    selectionState_.activeFeatureId = featureId;
+    normalizeSelectionState();
+}
+
+void ViewerWindow::Viewport::focusSelectedObject() {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    updateSceneTransforms();
+    applyFocusBounds(objectFocusBounds(objectIndex));
+    update();
+}
+
 renderer::parametric_model::BoxSpec ViewerWindow::Viewport::boxSpec() const {
-    return sceneObjects_[0].parametricObjectDescriptor.basePrimitive.box;
+    const auto* primitive = findObjectPrimitive(sceneObjects_[0].parametricObjectDescriptor);
+    return primitive != nullptr ? primitive->box : renderer::parametric_model::BoxSpec {};
 }
 
 renderer::parametric_model::CylinderSpec ViewerWindow::Viewport::cylinderSpec() const {
-    return sceneObjects_[1].parametricObjectDescriptor.basePrimitive.cylinder;
+    const auto* primitive = findObjectPrimitive(sceneObjects_[1].parametricObjectDescriptor);
+    return primitive != nullptr ? primitive->cylinder : renderer::parametric_model::CylinderSpec {};
 }
 
 renderer::parametric_model::SphereSpec ViewerWindow::Viewport::sphereSpec() const {
-    return sceneObjects_[2].parametricObjectDescriptor.basePrimitive.sphere;
+    const auto* primitive = findObjectPrimitive(sceneObjects_[2].parametricObjectDescriptor);
+    return primitive != nullptr ? primitive->sphere : renderer::parametric_model::SphereSpec {};
 }
 
 float ViewerWindow::Viewport::nearPlane() const {
@@ -899,33 +1099,50 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         auto& objectState = state.objects[index];
+        const auto& descriptor = sceneObjects_[index].parametricObjectDescriptor;
+        objectState.id = descriptor.metadata.id;
+        objectState.primitiveKind = descriptor.metadata.objectKind;
         objectState.visible = objectVisible(index);
         objectState.rotationSpeed = objectRotationSpeed(index);
         objectState.color = objectColor(index);
         objectState.bounds = objectLocalBounds(index);
 
-        const auto* mirrorOperator = findObjectOperator(
-            sceneObjects_[index].parametricObjectDescriptor,
-            renderer::parametric_model::OperatorKind::mirror);
-        if (mirrorOperator != nullptr) {
-            objectState.mirror.enabled = mirrorOperator->enabled;
-            objectState.mirror.axis = static_cast<int>(mirrorOperator->mirror.axis);
-            objectState.mirror.planeOffset = mirrorOperator->mirror.planeOffset;
+        const auto* mirrorFeature = findObjectFeature(
+            descriptor,
+            renderer::parametric_model::FeatureKind::mirror);
+        if (mirrorFeature != nullptr) {
+            objectState.mirror.enabled = mirrorFeature->enabled;
+            objectState.mirror.axis = static_cast<int>(mirrorFeature->mirror.axis);
+            objectState.mirror.planeOffset = mirrorFeature->mirror.planeOffset;
         }
 
-        const auto* linearArrayOperator = findObjectOperator(
-            sceneObjects_[index].parametricObjectDescriptor,
-            renderer::parametric_model::OperatorKind::linear_array);
-        if (linearArrayOperator != nullptr) {
-            objectState.linearArray.enabled = linearArrayOperator->enabled;
-            objectState.linearArray.count = static_cast<int>(linearArrayOperator->linearArray.count);
-            objectState.linearArray.offset = linearArrayOperator->linearArray.offset;
+        const auto* linearArrayFeature = findObjectFeature(
+            descriptor,
+            renderer::parametric_model::FeatureKind::linear_array);
+        if (linearArrayFeature != nullptr) {
+            objectState.linearArray.enabled = linearArrayFeature->enabled;
+            objectState.linearArray.count = static_cast<int>(linearArrayFeature->linearArray.count);
+            objectState.linearArray.offset = linearArrayFeature->linearArray.offset;
+        }
+
+        objectState.features.clear();
+        objectState.features.reserve(descriptor.features.size());
+        for (const auto& feature : descriptor.features) {
+            objectState.features.push_back({
+                feature.id,
+                feature.kind,
+                feature.enabled
+            });
         }
     }
 
     state.lighting.ambientStrength = ambientStrength();
     state.lighting.lightDirection = lightDirection();
     state.camera = cameraPanelState();
+    state.selection.selectedObjectId = selectionState_.selectedObjectId;
+    state.selection.activeObjectId = selectionState_.activeObjectId;
+    state.selection.selectedFeatureId = selectionState_.selectedFeatureId;
+    state.selection.activeFeatureId = selectionState_.activeFeatureId;
     state.modelChangeViewStrategy =
         modelChangeViewStrategy() == model_change_view::ViewStrategy::auto_frame ? 1 : 0;
     state.box = boxSpec();
@@ -1348,39 +1565,150 @@ void ViewerWindow::Viewport::applyFocusBounds(const renderer::scene_contract::Aa
     notifyCameraStateChanged();
 }
 
-renderer::parametric_model::OperatorDescriptor* ViewerWindow::Viewport::ensureObjectOperator(
+renderer::parametric_model::FeatureDescriptor* ViewerWindow::Viewport::ensureObjectFeature(
     renderer::parametric_model::ParametricObjectDescriptor& descriptor,
-    renderer::parametric_model::OperatorKind kind)
+    renderer::parametric_model::FeatureKind kind)
 {
-    for (auto& operatorDescriptor : descriptor.operators) {
-        if (operatorDescriptor.kind == kind) {
-            return &operatorDescriptor;
+    for (auto& feature : descriptor.features) {
+        if (feature.kind == kind) {
+            return &feature;
         }
     }
 
-    if (kind == renderer::parametric_model::OperatorKind::mirror) {
-        descriptor.operators.insert(descriptor.operators.begin(), makeMirrorOperatorDescriptor());
-        return &descriptor.operators.front();
+    if (kind == renderer::parametric_model::FeatureKind::primitive) {
+        descriptor.features.insert(
+            descriptor.features.begin(),
+            renderer::parametric_model::PrimitiveFactory::makePrimitiveFeature({}));
+        return &descriptor.features.front();
     }
 
-    if (kind == renderer::parametric_model::OperatorKind::linear_array) {
-        descriptor.operators.push_back(makeLinearArrayOperatorDescriptor());
-        return &descriptor.operators.back();
+    if (kind == renderer::parametric_model::FeatureKind::mirror) {
+        descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeMirrorFeature());
+        return &descriptor.features.back();
+    }
+
+    if (kind == renderer::parametric_model::FeatureKind::linear_array) {
+        descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeLinearArrayFeature());
+        return &descriptor.features.back();
     }
 
     return nullptr;
 }
 
-const renderer::parametric_model::OperatorDescriptor* ViewerWindow::Viewport::findObjectOperator(
+const renderer::parametric_model::FeatureDescriptor* ViewerWindow::Viewport::findObjectFeature(
     const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
-    renderer::parametric_model::OperatorKind kind) const
+    renderer::parametric_model::FeatureKind kind) const
 {
-    for (const auto& operatorDescriptor : descriptor.operators) {
-        if (operatorDescriptor.kind == kind) {
-            return &operatorDescriptor;
+    for (const auto& feature : descriptor.features) {
+        if (feature.kind == kind) {
+            return &feature;
         }
     }
     return nullptr;
+}
+
+renderer::parametric_model::FeatureDescriptor* ViewerWindow::Viewport::findObjectFeatureById(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::ParametricFeatureId featureId)
+{
+    for (auto& feature : descriptor.features) {
+        if (feature.id == featureId) {
+            return &feature;
+        }
+    }
+    return nullptr;
+}
+
+const renderer::parametric_model::FeatureDescriptor* ViewerWindow::Viewport::findObjectFeatureById(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::ParametricFeatureId featureId) const
+{
+    for (const auto& feature : descriptor.features) {
+        if (feature.id == featureId) {
+            return &feature;
+        }
+    }
+    return nullptr;
+}
+
+renderer::parametric_model::PrimitiveDescriptor* ViewerWindow::Viewport::ensureObjectPrimitive(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    auto* feature = ensureObjectFeature(descriptor, renderer::parametric_model::FeatureKind::primitive);
+    if (feature == nullptr) {
+        return nullptr;
+    }
+    return &feature->primitive;
+}
+
+const renderer::parametric_model::PrimitiveDescriptor* ViewerWindow::Viewport::findObjectPrimitive(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor) const
+{
+    const auto* feature = findObjectFeature(descriptor, renderer::parametric_model::FeatureKind::primitive);
+    if (feature == nullptr) {
+        return nullptr;
+    }
+    return &feature->primitive;
+}
+
+int ViewerWindow::Viewport::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        if (sceneObjects_[index].parametricObjectDescriptor.metadata.id == objectId) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+bool ViewerWindow::Viewport::featureBelongsToObject(
+    renderer::parametric_model::ParametricObjectId objectId,
+    renderer::parametric_model::ParametricFeatureId featureId) const
+{
+    const int objectIndex = findObjectIndexById(objectId);
+    if (objectIndex < 0) {
+        return false;
+    }
+
+    return findObjectFeatureById(sceneObjects_[objectIndex].parametricObjectDescriptor, featureId) != nullptr;
+}
+
+renderer::parametric_model::ParametricFeatureId ViewerWindow::Viewport::firstFeatureIdForObject(
+    renderer::parametric_model::ParametricObjectId objectId) const
+{
+    const int objectIndex = findObjectIndexById(objectId);
+    if (objectIndex < 0) {
+        return 0U;
+    }
+
+    const auto& features = sceneObjects_[objectIndex].parametricObjectDescriptor.features;
+    if (features.empty()) {
+        return 0U;
+    }
+    return features.front().id;
+}
+
+void ViewerWindow::Viewport::normalizeSelectionState() {
+    if (selectionState_.selectedObjectId == 0U || findObjectIndexById(selectionState_.selectedObjectId) < 0) {
+        if (!sceneObjects_.empty()) {
+            selectionState_.selectedObjectId = sceneObjects_.front().parametricObjectDescriptor.metadata.id;
+        }
+    }
+
+    if (selectionState_.activeObjectId == 0U || findObjectIndexById(selectionState_.activeObjectId) < 0) {
+        selectionState_.activeObjectId = selectionState_.selectedObjectId;
+    }
+
+    if (!featureBelongsToObject(selectionState_.selectedObjectId, selectionState_.selectedFeatureId)) {
+        selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
+    }
+
+    if (!featureBelongsToObject(selectionState_.activeObjectId, selectionState_.activeFeatureId)) {
+        if (featureBelongsToObject(selectionState_.activeObjectId, selectionState_.selectedFeatureId)) {
+            selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
+        } else {
+            selectionState_.activeFeatureId = firstFeatureIdForObject(selectionState_.activeObjectId);
+        }
+    }
 }
 
 void ViewerWindow::Viewport::applyParametricObjectDescriptor(
@@ -1392,6 +1720,7 @@ void ViewerWindow::Viewport::applyParametricObjectDescriptor(
     }
 
     sceneObjects_[index].parametricObjectDescriptor = descriptor;
+    normalizeSelectionState();
     rebuildObjectMesh(index);
     markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
     processPendingModelChange();

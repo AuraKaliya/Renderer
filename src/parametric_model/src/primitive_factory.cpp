@@ -11,6 +11,16 @@ constexpr std::uint32_t kMinimumCylinderSegments = 3U;
 constexpr std::uint32_t kMinimumSphereSlices = 3U;
 constexpr std::uint32_t kMinimumSphereStacks = 2U;
 
+ParametricObjectId nextParametricObjectId() {
+    static ParametricObjectId nextId = 1U;
+    return nextId++;
+}
+
+ParametricFeatureId nextParametricFeatureId() {
+    static ParametricFeatureId nextId = 1U;
+    return nextId++;
+}
+
 renderer::scene_contract::VertexPNT makeVertex(
     float px,
     float py,
@@ -424,11 +434,43 @@ PrimitiveDescriptor PrimitiveFactory::makeSphereDescriptor(
     return descriptor;
 }
 
+FeatureDescriptor PrimitiveFactory::makePrimitiveFeature(
+    const PrimitiveDescriptor& primitive)
+{
+    FeatureDescriptor feature;
+    feature.id = nextParametricFeatureId();
+    feature.kind = FeatureKind::primitive;
+    feature.enabled = true;
+    feature.primitive = primitive;
+    return feature;
+}
+
+FeatureDescriptor PrimitiveFactory::makeMirrorFeature() {
+    FeatureDescriptor feature;
+    feature.id = nextParametricFeatureId();
+    feature.kind = FeatureKind::mirror;
+    feature.enabled = false;
+    feature.mirror.axis = Axis::x;
+    return feature;
+}
+
+FeatureDescriptor PrimitiveFactory::makeLinearArrayFeature() {
+    FeatureDescriptor feature;
+    feature.id = nextParametricFeatureId();
+    feature.kind = FeatureKind::linear_array;
+    feature.enabled = false;
+    feature.linearArray.count = 1U;
+    feature.linearArray.offset = {1.0F, 0.0F, 0.0F};
+    return feature;
+}
+
 ParametricObjectDescriptor PrimitiveFactory::makeParametricObject(
     const PrimitiveDescriptor& basePrimitive)
 {
     ParametricObjectDescriptor descriptor;
-    descriptor.basePrimitive = basePrimitive;
+    descriptor.metadata.id = nextParametricObjectId();
+    descriptor.metadata.objectKind = basePrimitive.kind;
+    descriptor.features.push_back(makePrimitiveFeature(basePrimitive));
     return descriptor;
 }
 
@@ -446,19 +488,30 @@ scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& desc
 }
 
 scene_contract::MeshData PrimitiveFactory::build(const ParametricObjectDescriptor& descriptor) {
-    scene_contract::MeshData mesh = build(descriptor.basePrimitive);
+    scene_contract::MeshData mesh;
+    bool hasBasePrimitive = false;
 
-    for (const auto& operatorDescriptor : descriptor.operators) {
-        if (!operatorDescriptor.enabled) {
+    for (const auto& feature : descriptor.features) {
+        if (!feature.enabled) {
             continue;
         }
 
-        switch (operatorDescriptor.kind) {
-        case OperatorKind::mirror:
-            mesh = applyMirror(mesh, operatorDescriptor.mirror);
+        switch (feature.kind) {
+        case FeatureKind::primitive:
+            mesh = build(feature.primitive);
+            hasBasePrimitive = true;
             break;
-        case OperatorKind::linear_array:
-            mesh = applyLinearArray(mesh, normalizeLinearArraySpec(operatorDescriptor.linearArray));
+        case FeatureKind::mirror:
+            if (!hasBasePrimitive) {
+                continue;
+            }
+            mesh = applyMirror(mesh, feature.mirror);
+            break;
+        case FeatureKind::linear_array:
+            if (!hasBasePrimitive) {
+                continue;
+            }
+            mesh = applyLinearArray(mesh, normalizeLinearArraySpec(feature.linearArray));
             break;
         }
     }

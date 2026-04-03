@@ -88,6 +88,17 @@ private:
         void setObjectLinearArrayEnabled(int index, bool enabled);
         void setObjectLinearArrayCount(int index, std::uint32_t count);
         void setObjectLinearArrayOffset(int index, const renderer::scene_contract::Vec3f& offset);
+        void addObjectFeature(int index, renderer::parametric_model::FeatureKind kind);
+        void removeObjectFeature(int index, renderer::parametric_model::ParametricFeatureId featureId);
+        void setObjectFeatureEnabled(
+            int index,
+            renderer::parametric_model::ParametricFeatureId featureId,
+            bool enabled);
+        void setSelectedObject(renderer::parametric_model::ParametricObjectId objectId);
+        void setActiveObject(renderer::parametric_model::ParametricObjectId objectId);
+        void setSelectedFeature(renderer::parametric_model::ParametricFeatureId featureId);
+        void setActiveFeature(renderer::parametric_model::ParametricFeatureId featureId);
+        void focusSelectedObject();
         [[nodiscard]] renderer::parametric_model::BoxSpec boxSpec() const;
         [[nodiscard]] renderer::parametric_model::CylinderSpec cylinderSpec() const;
         [[nodiscard]] renderer::parametric_model::SphereSpec sphereSpec() const;
@@ -128,12 +139,29 @@ private:
             const renderer::parametric_model::ParametricObjectDescriptor& descriptor);
         void rebuildObjectMesh(int index);
         void updateSceneTransforms();
-        renderer::parametric_model::OperatorDescriptor* ensureObjectOperator(
+        renderer::parametric_model::FeatureDescriptor* ensureObjectFeature(
             renderer::parametric_model::ParametricObjectDescriptor& descriptor,
-            renderer::parametric_model::OperatorKind kind);
-        [[nodiscard]] const renderer::parametric_model::OperatorDescriptor* findObjectOperator(
+            renderer::parametric_model::FeatureKind kind);
+        [[nodiscard]] const renderer::parametric_model::FeatureDescriptor* findObjectFeature(
             const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
-            renderer::parametric_model::OperatorKind kind) const;
+            renderer::parametric_model::FeatureKind kind) const;
+        renderer::parametric_model::FeatureDescriptor* findObjectFeatureById(
+            renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::ParametricFeatureId featureId);
+        [[nodiscard]] const renderer::parametric_model::FeatureDescriptor* findObjectFeatureById(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::ParametricFeatureId featureId) const;
+        renderer::parametric_model::PrimitiveDescriptor* ensureObjectPrimitive(
+            renderer::parametric_model::ParametricObjectDescriptor& descriptor);
+        [[nodiscard]] const renderer::parametric_model::PrimitiveDescriptor* findObjectPrimitive(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor) const;
+        [[nodiscard]] int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
+        [[nodiscard]] bool featureBelongsToObject(
+            renderer::parametric_model::ParametricObjectId objectId,
+            renderer::parametric_model::ParametricFeatureId featureId) const;
+        [[nodiscard]] renderer::parametric_model::ParametricFeatureId firstFeatureIdForObject(
+            renderer::parametric_model::ParametricObjectId objectId) const;
+        void normalizeSelectionState();
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleSceneWorldBounds() const;
@@ -156,7 +184,15 @@ private:
             bool visible = true;
         };
 
+        struct SelectionState {
+            renderer::parametric_model::ParametricObjectId selectedObjectId = 0U;
+            renderer::parametric_model::ParametricObjectId activeObjectId = 0U;
+            renderer::parametric_model::ParametricFeatureId selectedFeatureId = 0U;
+            renderer::parametric_model::ParametricFeatureId activeFeatureId = 0U;
+        };
+
         std::array<SceneObject, 3> sceneObjects_ {};
+        SelectionState selectionState_ {};
         renderer::scene_contract::DirectionalLightData light_ {};
         OrbitCameraController cameraController_;
         renderer::render_core::SceneRepository repository_;

@@ -1,9 +1,11 @@
 #include "viewer_control_panel.h"
 
 #include <QGroupBox>
+#include <QCheckBox>
 #include <QLabel>
-#include <QPushButton>
 #include <QComboBox>
+#include <QListWidget>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QTabWidget>
@@ -56,6 +58,32 @@ ScrollableTabPage makeScrollableTabPage(QWidget* parent) {
     return tabPage;
 }
 
+QString primitiveKindText(renderer::parametric_model::PrimitiveKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::PrimitiveKind::box:
+        return QStringLiteral("Box");
+    case renderer::parametric_model::PrimitiveKind::cylinder:
+        return QStringLiteral("Cylinder");
+    case renderer::parametric_model::PrimitiveKind::sphere:
+        return QStringLiteral("Sphere");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
+QString featureKindText(renderer::parametric_model::FeatureKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::FeatureKind::primitive:
+        return QStringLiteral("Primitive");
+    case renderer::parametric_model::FeatureKind::mirror:
+        return QStringLiteral("Mirror");
+    case renderer::parametric_model::FeatureKind::linear_array:
+        return QStringLiteral("Linear Array");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
 }  // namespace
 
 ViewerControlPanel::ViewerControlPanel(QWidget* parent)
@@ -83,6 +111,142 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     tabWidget->addTab(sceneTab.page, "Scene");
     tabWidget->addTab(cameraTab.page, "Camera");
     tabWidget->addTab(debugTab.page, "Debug");
+
+    auto* explorerGroup = new QGroupBox("Object Explorer", sceneTab.content);
+    auto* explorerLayout = new QVBoxLayout(explorerGroup);
+
+    explorerLayout->addWidget(new QLabel("Objects", explorerGroup));
+
+    objectListWidget_ = new QListWidget(explorerGroup);
+    objectListWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(objectListWidget_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0 || row >= kSceneObjectCount) {
+            return;
+        }
+
+        inspectedObjectIndex_ = row;
+        inspectedFeatureId_ = 0U;
+        refreshFeatureExplorer();
+        emit objectSelectionChanged(static_cast<int>(panelState_.objects[inspectedObjectIndex_].id));
+    });
+    explorerLayout->addWidget(objectListWidget_);
+
+    objectSelectionLabel_ = new QLabel(explorerGroup);
+    objectSelectionLabel_->setWordWrap(true);
+    objectSelectionLabel_->setTextFormat(Qt::PlainText);
+    explorerLayout->addWidget(objectSelectionLabel_);
+
+    activateObjectButton_ = new QPushButton("Activate Selected Object", explorerGroup);
+    connect(activateObjectButton_, &QPushButton::clicked, this, [this]() {
+        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+            return;
+        }
+        emit objectActivationRequested(static_cast<int>(panelState_.objects[inspectedObjectIndex_].id));
+    });
+    explorerLayout->addWidget(activateObjectButton_);
+
+    focusSelectedObjectButton_ = new QPushButton("Focus Selected Object", explorerGroup);
+    connect(focusSelectedObjectButton_, &QPushButton::clicked, this, [this]() {
+        emit focusSelectedObjectRequested();
+    });
+    explorerLayout->addWidget(focusSelectedObjectButton_);
+
+    explorerLayout->addWidget(new QLabel("Features", explorerGroup));
+
+    featureListWidget_ = new QListWidget(explorerGroup);
+    featureListWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(featureListWidget_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0) {
+            inspectedFeatureId_ = 0U;
+            updateFeatureActionState();
+            return;
+        }
+
+        const auto* item = featureListWidget_->item(row);
+        if (item == nullptr) {
+            inspectedFeatureId_ = 0U;
+            updateFeatureActionState();
+            return;
+        }
+
+        inspectedFeatureId_ = static_cast<renderer::parametric_model::ParametricFeatureId>(
+            item->data(Qt::UserRole).toUInt());
+        updateFeatureActionState();
+        emit featureSelectionChanged(
+            static_cast<int>(panelState_.objects[inspectedObjectIndex_].id),
+            static_cast<int>(inspectedFeatureId_));
+    });
+    explorerLayout->addWidget(featureListWidget_);
+
+    featureSelectionLabel_ = new QLabel(explorerGroup);
+    featureSelectionLabel_->setWordWrap(true);
+    featureSelectionLabel_->setTextFormat(Qt::PlainText);
+    explorerLayout->addWidget(featureSelectionLabel_);
+
+    activateFeatureButton_ = new QPushButton("Activate Selected Feature", explorerGroup);
+    connect(activateFeatureButton_, &QPushButton::clicked, this, [this]() {
+        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount || inspectedFeatureId_ == 0U) {
+            return;
+        }
+
+        emit featureActivationRequested(
+            static_cast<int>(panelState_.objects[inspectedObjectIndex_].id),
+            static_cast<int>(inspectedFeatureId_));
+    });
+    explorerLayout->addWidget(activateFeatureButton_);
+
+    featureEnabledCheckBox_ = new QCheckBox("Selected Feature Enabled", explorerGroup);
+    connect(featureEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+            return;
+        }
+
+        const auto& objectState = panelState_.objects[inspectedObjectIndex_];
+        for (const auto& feature : objectState.features) {
+            if (feature.id != inspectedFeatureId_) {
+                continue;
+            }
+
+            if (feature.kind == renderer::parametric_model::FeatureKind::primitive) {
+                const QSignalBlocker blocker(featureEnabledCheckBox_);
+                featureEnabledCheckBox_->setChecked(true);
+                return;
+            }
+
+            emit objectFeatureEnabledChanged(
+                inspectedObjectIndex_,
+                static_cast<int>(feature.id),
+                checked);
+            return;
+        }
+    });
+    explorerLayout->addWidget(featureEnabledCheckBox_);
+
+    addMirrorFeatureButton_ = new QPushButton("Add Mirror Feature", explorerGroup);
+    connect(addMirrorFeatureButton_, &QPushButton::clicked, this, [this]() {
+        emit objectFeatureAddRequested(
+            inspectedObjectIndex_,
+            static_cast<int>(renderer::parametric_model::FeatureKind::mirror));
+    });
+    explorerLayout->addWidget(addMirrorFeatureButton_);
+
+    addLinearArrayFeatureButton_ = new QPushButton("Add Linear Array Feature", explorerGroup);
+    connect(addLinearArrayFeatureButton_, &QPushButton::clicked, this, [this]() {
+        emit objectFeatureAddRequested(
+            inspectedObjectIndex_,
+            static_cast<int>(renderer::parametric_model::FeatureKind::linear_array));
+    });
+    explorerLayout->addWidget(addLinearArrayFeatureButton_);
+
+    removeFeatureButton_ = new QPushButton("Remove Selected Feature", explorerGroup);
+    connect(removeFeatureButton_, &QPushButton::clicked, this, [this]() {
+        emit objectFeatureRemoveRequested(
+            inspectedObjectIndex_,
+            static_cast<int>(inspectedFeatureId_));
+    });
+    explorerLayout->addWidget(removeFeatureButton_);
+
+    sceneTab.contentLayout->addWidget(explorerGroup);
 
     for (int index = 0; index < kSceneObjectCount; ++index) {
         const auto primitiveKind =
@@ -242,9 +406,21 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     debugTab.contentLayout->addWidget(boundsGroup);
     debugTab.contentLayout->addWidget(debugActionGroup);
     debugTab.contentLayout->addStretch(1);
+
+    refreshObjectExplorer();
+    refreshFeatureExplorer();
 }
 
 void ViewerControlPanel::setPanelState(const PanelState& state) {
+    panelState_ = state;
+    const int selectedObjectIndex = findObjectIndexById(panelState_.selection.selectedObjectId);
+    if (selectedObjectIndex >= 0) {
+        inspectedObjectIndex_ = selectedObjectIndex;
+    } else if (inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+        inspectedObjectIndex_ = 0;
+    }
+    inspectedFeatureId_ = panelState_.selection.selectedFeatureId;
+
     for (int index = 0; index < kSceneObjectCount; ++index) {
         const auto& object = state.objects[index];
         setObjectState(index, object.visible, object.rotationSpeed, object.color);
@@ -262,6 +438,9 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
             modelChangeViewStrategyComboBox_->setCurrentIndex(comboIndex);
         }
     }
+
+    refreshObjectExplorer();
+    refreshFeatureExplorer();
 }
 
 void ViewerControlPanel::setObjectState(
@@ -333,4 +512,151 @@ void ViewerControlPanel::setCameraState(const CameraPanelState& state) {
         state.nearPlane,
         state.farPlane,
         state.orbitCenter);
+}
+
+void ViewerControlPanel::refreshObjectExplorer() {
+    if (objectListWidget_ == nullptr) {
+        return;
+    }
+
+    const QSignalBlocker blocker(objectListWidget_);
+    objectListWidget_->clear();
+
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        const auto& object = panelState_.objects[index];
+        const bool isSelected = object.id == panelState_.selection.selectedObjectId;
+        const bool isActive = object.id == panelState_.selection.activeObjectId;
+        auto* item = new QListWidgetItem(
+            QStringLiteral("%1. %2  [id:%3]  (%4 features)%5%6")
+                .arg(index + 1)
+                .arg(primitiveKindText(object.primitiveKind))
+                .arg(object.id)
+                .arg(static_cast<int>(object.features.size()))
+                .arg(isSelected ? QStringLiteral("  [Selected]") : QString())
+                .arg(isActive ? QStringLiteral("  [Active]") : QString()),
+            objectListWidget_);
+        item->setData(Qt::UserRole, index);
+    }
+
+    objectListWidget_->setCurrentRow(inspectedObjectIndex_);
+}
+
+void ViewerControlPanel::refreshFeatureExplorer() {
+    if (featureListWidget_ == nullptr || inspectedObjectIndex_ < 0 || inspectedObjectIndex_ >= kSceneObjectCount) {
+        return;
+    }
+
+    const auto& object = panelState_.objects[inspectedObjectIndex_];
+    bool hasSelectedFeature = false;
+    for (const auto& feature : object.features) {
+        if (feature.id == inspectedFeatureId_) {
+            hasSelectedFeature = true;
+            break;
+        }
+    }
+    if (!hasSelectedFeature) {
+        inspectedFeatureId_ = object.features.empty() ? 0U : object.features.front().id;
+    }
+
+    const QSignalBlocker blocker(featureListWidget_);
+    featureListWidget_->clear();
+
+    int selectedRow = -1;
+    for (int row = 0; row < static_cast<int>(object.features.size()); ++row) {
+        const auto& feature = object.features[static_cast<std::size_t>(row)];
+        const bool isSelected = feature.id == panelState_.selection.selectedFeatureId;
+        const bool isActive = feature.id == panelState_.selection.activeFeatureId;
+        auto* item = new QListWidgetItem(
+            QStringLiteral("%1  [id:%2]  [%3]%4%5")
+                .arg(featureKindText(feature.kind))
+                .arg(feature.id)
+                .arg(feature.enabled ? QStringLiteral("Enabled") : QStringLiteral("Disabled"))
+                .arg(isSelected ? QStringLiteral("  [Selected]") : QString())
+                .arg(isActive ? QStringLiteral("  [Active]") : QString()),
+            featureListWidget_);
+        item->setData(Qt::UserRole, static_cast<uint>(feature.id));
+        if (feature.id == inspectedFeatureId_) {
+            selectedRow = row;
+        }
+    }
+
+    featureListWidget_->setCurrentRow(selectedRow);
+    updateFeatureActionState();
+}
+
+void ViewerControlPanel::updateFeatureActionState() {
+    if (featureEnabledCheckBox_ == nullptr
+        || objectSelectionLabel_ == nullptr
+        || featureSelectionLabel_ == nullptr
+        || activateObjectButton_ == nullptr
+        || activateFeatureButton_ == nullptr
+        || focusSelectedObjectButton_ == nullptr
+        || addMirrorFeatureButton_ == nullptr
+        || addLinearArrayFeatureButton_ == nullptr
+        || removeFeatureButton_ == nullptr
+        || inspectedObjectIndex_ < 0
+        || inspectedObjectIndex_ >= kSceneObjectCount) {
+        return;
+    }
+
+    const auto& object = panelState_.objects[inspectedObjectIndex_];
+    bool hasMirrorFeature = false;
+    bool hasLinearArrayFeature = false;
+    const FeaturePanelState* selectedFeature = nullptr;
+
+    for (const auto& feature : object.features) {
+        if (feature.kind == renderer::parametric_model::FeatureKind::mirror) {
+            hasMirrorFeature = true;
+        }
+        if (feature.kind == renderer::parametric_model::FeatureKind::linear_array) {
+            hasLinearArrayFeature = true;
+        }
+        if (feature.id == inspectedFeatureId_) {
+            selectedFeature = &feature;
+        }
+    }
+
+    addMirrorFeatureButton_->setEnabled(!hasMirrorFeature);
+    addLinearArrayFeatureButton_->setEnabled(!hasLinearArrayFeature);
+    activateObjectButton_->setEnabled(
+        panelState_.selection.selectedObjectId != 0U
+        && panelState_.selection.selectedObjectId != panelState_.selection.activeObjectId);
+    focusSelectedObjectButton_->setEnabled(panelState_.selection.selectedObjectId != 0U);
+
+    const QSignalBlocker blocker(featureEnabledCheckBox_);
+    objectSelectionLabel_->setText(
+        QStringLiteral("Selected Object: %1\nActive Object: %2")
+            .arg(panelState_.selection.selectedObjectId)
+            .arg(panelState_.selection.activeObjectId));
+    if (selectedFeature == nullptr) {
+        featureEnabledCheckBox_->setChecked(false);
+        featureEnabledCheckBox_->setEnabled(false);
+        activateFeatureButton_->setEnabled(false);
+        removeFeatureButton_->setEnabled(false);
+        featureSelectionLabel_->setText(
+            QStringLiteral("Selected Feature: none\nActive Feature: %1")
+                .arg(panelState_.selection.activeFeatureId));
+        return;
+    }
+
+    featureSelectionLabel_->setText(
+        QStringLiteral("Selected Feature: %1\nActive Feature: %2")
+            .arg(panelState_.selection.selectedFeatureId)
+            .arg(panelState_.selection.activeFeatureId));
+    featureEnabledCheckBox_->setChecked(selectedFeature->enabled);
+    const bool removable = selectedFeature->kind != renderer::parametric_model::FeatureKind::primitive;
+    featureEnabledCheckBox_->setEnabled(removable);
+    activateFeatureButton_->setEnabled(
+        panelState_.selection.selectedFeatureId != 0U
+        && panelState_.selection.selectedFeatureId != panelState_.selection.activeFeatureId);
+    removeFeatureButton_->setEnabled(removable);
+}
+
+int ViewerControlPanel::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {
+    for (int index = 0; index < kSceneObjectCount; ++index) {
+        if (panelState_.objects[index].id == objectId) {
+            return index;
+        }
+    }
+    return -1;
 }

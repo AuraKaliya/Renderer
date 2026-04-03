@@ -38,11 +38,6 @@ struct PrimitiveDescriptor {
     SphereSpec sphere {};
 };
 
-enum class OperatorKind : std::uint8_t {
-    mirror,
-    linear_array
-};
-
 enum class Axis : std::uint8_t {
     x,
     y,
@@ -59,16 +54,33 @@ struct LinearArrayOperatorSpec {
     scene_contract::Vec3f offset {1.0F, 0.0F, 0.0F};
 };
 
-struct OperatorDescriptor {
-    OperatorKind kind = OperatorKind::mirror;
-    bool enabled = false;
+using ParametricObjectId = std::uint32_t;
+using ParametricFeatureId = std::uint32_t;
+
+enum class FeatureKind : std::uint8_t {
+    primitive,
+    mirror,
+    linear_array
+};
+
+struct ParametricObjectMetadata {
+    ParametricObjectId id = 0U;
+    PrimitiveKind objectKind = PrimitiveKind::box;
+    scene_contract::Vec3f pivot {0.0F, 0.0F, 0.0F};
+};
+
+struct FeatureDescriptor {
+    ParametricFeatureId id = 0U;
+    FeatureKind kind = FeatureKind::primitive;
+    bool enabled = true;
+    PrimitiveDescriptor primitive {};
     MirrorOperatorSpec mirror {};
     LinearArrayOperatorSpec linearArray {};
 };
 
 struct ParametricObjectDescriptor {
-    PrimitiveDescriptor basePrimitive {};
-    std::vector<OperatorDescriptor> operators;
+    ParametricObjectMetadata metadata {};
+    std::vector<FeatureDescriptor> features;
 };
 
 class PrimitiveFactory {
@@ -87,6 +99,13 @@ public:
         float radius,
         std::uint32_t slices = 24U,
         std::uint32_t stacks = 16U);
+
+    [[nodiscard]] static FeatureDescriptor makePrimitiveFeature(
+        const PrimitiveDescriptor& primitive);
+
+    [[nodiscard]] static FeatureDescriptor makeMirrorFeature();
+
+    [[nodiscard]] static FeatureDescriptor makeLinearArrayFeature();
 
     [[nodiscard]] static ParametricObjectDescriptor makeParametricObject(
         const PrimitiveDescriptor& basePrimitive);
