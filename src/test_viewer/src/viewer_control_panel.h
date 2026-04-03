@@ -95,6 +95,7 @@ private:
         int index,
         const SceneObjectControlWidget::MirrorState& mirror,
         const SceneObjectControlWidget::LinearArrayState& linearArray);
+    void setObjectPrimitiveState(int index, const PanelState& state);
     void setObjectBounds(int index, const renderer::scene_contract::Aabb& bounds);
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(const CameraPanelState& state);
@@ -104,13 +105,4 @@ private:
     LightingControlWidget* lightingWidget_ = nullptr;
     CameraControlWidget* cameraWidget_ = nullptr;
     class QComboBox* modelChangeViewStrategyComboBox_ = nullptr;
-    class QDoubleSpinBox* boxWidthSpinBox_ = nullptr;
-    class QDoubleSpinBox* boxHeightSpinBox_ = nullptr;
-    class QDoubleSpinBox* boxDepthSpinBox_ = nullptr;
-    class QDoubleSpinBox* cylinderRadiusSpinBox_ = nullptr;
-    class QDoubleSpinBox* cylinderHeightSpinBox_ = nullptr;
-    class QSpinBox* cylinderSegmentsSpinBox_ = nullptr;
-    class QDoubleSpinBox* sphereRadiusSpinBox_ = nullptr;
-    class QSpinBox* sphereSlicesSpinBox_ = nullptr;
-    class QSpinBox* sphereStacksSpinBox_ = nullptr;
 };

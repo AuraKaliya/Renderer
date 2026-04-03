@@ -9,42 +9,62 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
-SceneObjectControlWidget::SceneObjectControlWidget(const QString& title, QWidget* parent)
+namespace {
+
+QDoubleSpinBox* makeFloatSpinBox(
+    QWidget* parent,
+    double minimum,
+    double maximum,
+    double step,
+    int decimals)
+{
+    auto* spinBox = new QDoubleSpinBox(parent);
+    spinBox->setRange(minimum, maximum);
+    spinBox->setSingleStep(step);
+    spinBox->setDecimals(decimals);
+    return spinBox;
+}
+
+}  // namespace
+
+SceneObjectControlWidget::SceneObjectControlWidget(
+    const QString& title,
+    PrimitivePanelKind primitiveKind,
+    QWidget* parent)
     : QWidget(parent)
+    , primitiveKind_(primitiveKind)
 {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
 
     auto* group = new QGroupBox(title, this);
-    auto* formLayout = new QFormLayout(group);
+    auto* groupLayout = new QVBoxLayout(group);
+
+    auto* objectGroup = new QGroupBox("Object", group);
+    auto* objectLayout = new QFormLayout(objectGroup);
+
+    auto* appearanceGroup = new QGroupBox("Appearance", group);
+    auto* appearanceLayout = new QFormLayout(appearanceGroup);
+
+    auto* primitiveGroup = new QGroupBox("Primitive", group);
+    auto* primitiveLayout = new QFormLayout(primitiveGroup);
+
+    auto* operatorGroup = new QGroupBox("Operators", group);
+    auto* operatorLayout = new QFormLayout(operatorGroup);
 
     visibleCheckBox_ = new QCheckBox(group);
     connect(visibleCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         emit visibleChanged(checked);
     });
 
-    speedSpinBox_ = new QDoubleSpinBox(group);
-    speedSpinBox_->setRange(-5.0, 5.0);
-    speedSpinBox_->setSingleStep(0.05);
-    speedSpinBox_->setDecimals(2);
+    speedSpinBox_ = makeFloatSpinBox(group, -5.0, 5.0, 0.05, 2);
     connect(speedSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         emit rotationSpeedChanged(static_cast<float>(value));
     });
 
-    redSpinBox_ = new QDoubleSpinBox(group);
-    redSpinBox_->setRange(0.0, 1.0);
-    redSpinBox_->setSingleStep(0.05);
-    redSpinBox_->setDecimals(2);
-
-    greenSpinBox_ = new QDoubleSpinBox(group);
-    greenSpinBox_->setRange(0.0, 1.0);
-    greenSpinBox_->setSingleStep(0.05);
-    greenSpinBox_->setDecimals(2);
-
-    blueSpinBox_ = new QDoubleSpinBox(group);
-    blueSpinBox_->setRange(0.0, 1.0);
-    blueSpinBox_->setSingleStep(0.05);
-    blueSpinBox_->setDecimals(2);
+    redSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
+    greenSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
+    blueSpinBox_ = makeFloatSpinBox(group, 0.0, 1.0, 0.05, 2);
 
     auto emitColor = [this]() {
         emit colorChanged(
@@ -63,6 +83,75 @@ SceneObjectControlWidget::SceneObjectControlWidget(const QString& title, QWidget
         emitColor();
     });
 
+    objectLayout->addRow("Visible", visibleCheckBox_);
+    objectLayout->addRow("Rotation", speedSpinBox_);
+
+    appearanceLayout->addRow("Red", redSpinBox_);
+    appearanceLayout->addRow("Green", greenSpinBox_);
+    appearanceLayout->addRow("Blue", blueSpinBox_);
+
+    if (primitiveKind_ == PrimitivePanelKind::box) {
+        boxWidthSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        boxHeightSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        boxDepthSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+
+        connect(boxWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit boxWidthChanged(static_cast<float>(value));
+        });
+        connect(boxHeightSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit boxHeightChanged(static_cast<float>(value));
+        });
+        connect(boxDepthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit boxDepthChanged(static_cast<float>(value));
+        });
+
+        primitiveLayout->addRow("Width", boxWidthSpinBox_);
+        primitiveLayout->addRow("Height", boxHeightSpinBox_);
+        primitiveLayout->addRow("Depth", boxDepthSpinBox_);
+    } else if (primitiveKind_ == PrimitivePanelKind::cylinder) {
+        cylinderRadiusSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        cylinderHeightSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        cylinderSegmentsSpinBox_ = new QSpinBox(group);
+        cylinderSegmentsSpinBox_->setRange(3, 128);
+        cylinderSegmentsSpinBox_->setSingleStep(1);
+
+        connect(cylinderRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit cylinderRadiusChanged(static_cast<float>(value));
+        });
+        connect(cylinderHeightSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit cylinderHeightChanged(static_cast<float>(value));
+        });
+        connect(cylinderSegmentsSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+            emit cylinderSegmentsChanged(value);
+        });
+
+        primitiveLayout->addRow("Radius", cylinderRadiusSpinBox_);
+        primitiveLayout->addRow("Height", cylinderHeightSpinBox_);
+        primitiveLayout->addRow("Segments", cylinderSegmentsSpinBox_);
+    } else {
+        sphereRadiusSpinBox_ = makeFloatSpinBox(group, 0.05, 10.0, 0.05, 2);
+        sphereSlicesSpinBox_ = new QSpinBox(group);
+        sphereSlicesSpinBox_->setRange(3, 128);
+        sphereSlicesSpinBox_->setSingleStep(1);
+        sphereStacksSpinBox_ = new QSpinBox(group);
+        sphereStacksSpinBox_->setRange(2, 128);
+        sphereStacksSpinBox_->setSingleStep(1);
+
+        connect(sphereRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+            emit sphereRadiusChanged(static_cast<float>(value));
+        });
+        connect(sphereSlicesSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+            emit sphereSlicesChanged(value);
+        });
+        connect(sphereStacksSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
+            emit sphereStacksChanged(value);
+        });
+
+        primitiveLayout->addRow("Radius", sphereRadiusSpinBox_);
+        primitiveLayout->addRow("Slices", sphereSlicesSpinBox_);
+        primitiveLayout->addRow("Stacks", sphereStacksSpinBox_);
+    }
+
     mirrorEnabledCheckBox_ = new QCheckBox(group);
     connect(mirrorEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         emit mirrorEnabledChanged(checked);
@@ -76,10 +165,7 @@ SceneObjectControlWidget::SceneObjectControlWidget(const QString& title, QWidget
         emit mirrorAxisChanged(mirrorAxisComboBox_->itemData(index).toInt());
     });
 
-    mirrorPlaneOffsetSpinBox_ = new QDoubleSpinBox(group);
-    mirrorPlaneOffsetSpinBox_->setRange(-10.0, 10.0);
-    mirrorPlaneOffsetSpinBox_->setSingleStep(0.1);
-    mirrorPlaneOffsetSpinBox_->setDecimals(2);
+    mirrorPlaneOffsetSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
     connect(mirrorPlaneOffsetSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         emit mirrorPlaneOffsetChanged(static_cast<float>(value));
     });
@@ -95,20 +181,9 @@ SceneObjectControlWidget::SceneObjectControlWidget(const QString& title, QWidget
         emit linearArrayCountChanged(value);
     });
 
-    linearArrayOffsetXSpinBox_ = new QDoubleSpinBox(group);
-    linearArrayOffsetXSpinBox_->setRange(-10.0, 10.0);
-    linearArrayOffsetXSpinBox_->setSingleStep(0.1);
-    linearArrayOffsetXSpinBox_->setDecimals(2);
-
-    linearArrayOffsetYSpinBox_ = new QDoubleSpinBox(group);
-    linearArrayOffsetYSpinBox_->setRange(-10.0, 10.0);
-    linearArrayOffsetYSpinBox_->setSingleStep(0.1);
-    linearArrayOffsetYSpinBox_->setDecimals(2);
-
-    linearArrayOffsetZSpinBox_ = new QDoubleSpinBox(group);
-    linearArrayOffsetZSpinBox_->setRange(-10.0, 10.0);
-    linearArrayOffsetZSpinBox_->setSingleStep(0.1);
-    linearArrayOffsetZSpinBox_->setDecimals(2);
+    linearArrayOffsetXSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
+    linearArrayOffsetYSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
+    linearArrayOffsetZSpinBox_ = makeFloatSpinBox(group, -10.0, 10.0, 0.1, 2);
 
     auto emitLinearArrayOffset = [this]() {
         emit linearArrayOffsetChanged(
@@ -127,20 +202,19 @@ SceneObjectControlWidget::SceneObjectControlWidget(const QString& title, QWidget
         emitLinearArrayOffset();
     });
 
-    formLayout->addRow("Visible", visibleCheckBox_);
-    formLayout->addRow("Rotation", speedSpinBox_);
-    formLayout->addRow("Red", redSpinBox_);
-    formLayout->addRow("Green", greenSpinBox_);
-    formLayout->addRow("Blue", blueSpinBox_);
-    formLayout->addRow("Mirror Enabled", mirrorEnabledCheckBox_);
-    formLayout->addRow("Mirror Axis", mirrorAxisComboBox_);
-    formLayout->addRow("Mirror Offset", mirrorPlaneOffsetSpinBox_);
-    formLayout->addRow("Array Enabled", linearArrayEnabledCheckBox_);
-    formLayout->addRow("Array Count", linearArrayCountSpinBox_);
-    formLayout->addRow("Array Offset X", linearArrayOffsetXSpinBox_);
-    formLayout->addRow("Array Offset Y", linearArrayOffsetYSpinBox_);
-    formLayout->addRow("Array Offset Z", linearArrayOffsetZSpinBox_);
+    operatorLayout->addRow("Mirror Enabled", mirrorEnabledCheckBox_);
+    operatorLayout->addRow("Mirror Axis", mirrorAxisComboBox_);
+    operatorLayout->addRow("Mirror Offset", mirrorPlaneOffsetSpinBox_);
+    operatorLayout->addRow("Array Enabled", linearArrayEnabledCheckBox_);
+    operatorLayout->addRow("Array Count", linearArrayCountSpinBox_);
+    operatorLayout->addRow("Array Offset X", linearArrayOffsetXSpinBox_);
+    operatorLayout->addRow("Array Offset Y", linearArrayOffsetYSpinBox_);
+    operatorLayout->addRow("Array Offset Z", linearArrayOffsetZSpinBox_);
 
+    groupLayout->addWidget(objectGroup);
+    groupLayout->addWidget(appearanceGroup);
+    groupLayout->addWidget(primitiveGroup);
+    groupLayout->addWidget(operatorGroup);
     rootLayout->addWidget(group);
 }
 
@@ -187,4 +261,46 @@ void SceneObjectControlWidget::setOperatorState(
     linearArrayOffsetXSpinBox_->setValue(linearArray.offset.x);
     linearArrayOffsetYSpinBox_->setValue(linearArray.offset.y);
     linearArrayOffsetZSpinBox_->setValue(linearArray.offset.z);
+}
+
+void SceneObjectControlWidget::setBoxSpec(const renderer::parametric_model::BoxSpec& spec) {
+    if (boxWidthSpinBox_ == nullptr || boxHeightSpinBox_ == nullptr || boxDepthSpinBox_ == nullptr) {
+        return;
+    }
+
+    const QSignalBlocker widthBlocker(boxWidthSpinBox_);
+    const QSignalBlocker heightBlocker(boxHeightSpinBox_);
+    const QSignalBlocker depthBlocker(boxDepthSpinBox_);
+
+    boxWidthSpinBox_->setValue(spec.width);
+    boxHeightSpinBox_->setValue(spec.height);
+    boxDepthSpinBox_->setValue(spec.depth);
+}
+
+void SceneObjectControlWidget::setCylinderSpec(const renderer::parametric_model::CylinderSpec& spec) {
+    if (cylinderRadiusSpinBox_ == nullptr || cylinderHeightSpinBox_ == nullptr || cylinderSegmentsSpinBox_ == nullptr) {
+        return;
+    }
+
+    const QSignalBlocker radiusBlocker(cylinderRadiusSpinBox_);
+    const QSignalBlocker heightBlocker(cylinderHeightSpinBox_);
+    const QSignalBlocker segmentsBlocker(cylinderSegmentsSpinBox_);
+
+    cylinderRadiusSpinBox_->setValue(spec.radius);
+    cylinderHeightSpinBox_->setValue(spec.height);
+    cylinderSegmentsSpinBox_->setValue(static_cast<int>(spec.segments));
+}
+
+void SceneObjectControlWidget::setSphereSpec(const renderer::parametric_model::SphereSpec& spec) {
+    if (sphereRadiusSpinBox_ == nullptr || sphereSlicesSpinBox_ == nullptr || sphereStacksSpinBox_ == nullptr) {
+        return;
+    }
+
+    const QSignalBlocker radiusBlocker(sphereRadiusSpinBox_);
+    const QSignalBlocker slicesBlocker(sphereSlicesSpinBox_);
+    const QSignalBlocker stacksBlocker(sphereStacksSpinBox_);
+
+    sphereRadiusSpinBox_->setValue(spec.radius);
+    sphereSlicesSpinBox_->setValue(static_cast<int>(spec.slices));
+    sphereStacksSpinBox_->setValue(static_cast<int>(spec.stacks));
 }
