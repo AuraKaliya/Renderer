@@ -626,7 +626,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
         && context() != nullptr
         && sceneObjects_[2].materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
         makeCurrent();
-        renderer_.updateMaterial(sceneObjects_[2].materialHandle, sceneObjects_[2].materialData);
+        (void)renderer_.updateMaterial(sceneObjects_[2].materialHandle, sceneObjects_[2].materialData);
         doneCurrent();
     }
 
@@ -651,6 +651,7 @@ void ViewerWindow::Viewport::setObjectVisible(int index, bool visible) {
     }
 
     sceneObjects_[index].visible = visible;
+    repository_.updateVisible(sceneObjects_[index].itemId, visible);
     markModelChanged(model_change_view::ChangeKind::scene_visibility);
     processPendingModelChange();
     update();
@@ -689,7 +690,7 @@ void ViewerWindow::Viewport::setObjectColor(int index, const renderer::scene_con
 
     if (renderer_.isInitialized() &&
         sceneObject.materialHandle != renderer::scene_contract::kInvalidMaterialHandle) {
-        renderer_.updateMaterial(sceneObject.materialHandle, sceneObject.materialData);
+        (void)renderer_.updateMaterial(sceneObject.materialHandle, sceneObject.materialData);
     }
 
     update();
@@ -1490,7 +1491,7 @@ void ViewerWindow::Viewport::paintGL() {
 
     offscreenTarget_->bind();
     if (renderer_.isInitialized()) {
-        renderer_.render(framePacket_);
+        (void)renderer_.render(framePacket_);
     } else {
         glViewport(0, 0, offscreenTarget_->width(), offscreenTarget_->height());
         glClearColor(0.45F, 0.08F, 0.08F, 1.0F);
@@ -1717,6 +1718,7 @@ void ViewerWindow::Viewport::rebuildRepositoryItems() {
         auto item = makeItem();
         item.meshHandle = sceneObject.meshHandle;
         item.materialHandle = sceneObject.materialHandle;
+        item.visible = sceneObject.visible;
         sceneObject.itemId = repository_.add(item);
         repository_.updateLocalBounds(sceneObject.itemId, sceneObject.meshData.localBounds);
     }
@@ -1937,6 +1939,7 @@ void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
 void ViewerWindow::Viewport::updateSceneTransforms() {
     for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         auto& sceneObject = sceneObjects_[index];
+        repository_.updateVisible(sceneObject.itemId, sceneObject.visible);
         repository_.updateTransform(
             sceneObject.itemId,
             currentObjectTransform(index));
@@ -1986,21 +1989,6 @@ void ViewerWindow::Viewport::rebuildFramePacket() {
 
     auto scene = repository_.snapshot(cameraController_.buildCameraData());
     scene.light = light_;
-
-    std::vector<renderer::scene_contract::RenderableItem> visibleItems;
-    visibleItems.reserve(sceneObjects_.size());
-
-    for (const auto& sceneObject : sceneObjects_) {
-        if (!sceneObject.visible) {
-            continue;
-        }
-        if (sceneObject.itemId >= scene.items.size()) {
-            continue;
-        }
-        visibleItems.push_back(scene.items[sceneObject.itemId]);
-    }
-
-    scene.items = std::move(visibleItems);
     framePacket_ = assembler_.build(scene, {width(), height()});
 }
 

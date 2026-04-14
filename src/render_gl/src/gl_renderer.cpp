@@ -1,6 +1,7 @@
 #include "renderer/render_gl/gl_renderer.h"
 
 #include <cstddef>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -12,7 +13,88 @@
 #include <windows.h>
 #endif
 #include <GL/gl.h>
+#if __has_include(<GL/glext.h>)
 #include <GL/glext.h>
+#else
+using GLchar = char;
+using GLsizeiptr = std::ptrdiff_t;
+
+#ifndef APIENTRY
+#define APIENTRY
+#endif
+#ifndef APIENTRYP
+#define APIENTRYP APIENTRY *
+#endif
+
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#endif
+#ifndef GL_ELEMENT_ARRAY_BUFFER
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#endif
+#ifndef GL_FRAGMENT_SHADER
+#define GL_FRAGMENT_SHADER 0x8B30
+#endif
+#ifndef GL_VERTEX_SHADER
+#define GL_VERTEX_SHADER 0x8B31
+#endif
+#ifndef GL_COMPILE_STATUS
+#define GL_COMPILE_STATUS 0x8B81
+#endif
+#ifndef GL_LINK_STATUS
+#define GL_LINK_STATUS 0x8B82
+#endif
+#ifndef GL_INFO_LOG_LENGTH
+#define GL_INFO_LOG_LENGTH 0x8B84
+#endif
+#ifndef GL_STATIC_DRAW
+#define GL_STATIC_DRAW 0x88E4
+#endif
+#ifndef GL_TEXTURE0
+#define GL_TEXTURE0 0x84C0
+#endif
+#ifndef GL_RGBA8
+#define GL_RGBA8 0x8058
+#endif
+
+typedef void (APIENTRYP PFNGLACTIVETEXTUREPROC)(GLenum texture);
+typedef void (APIENTRYP PFNGLATTACHSHADERPROC)(GLuint program, GLuint shader);
+typedef void (APIENTRYP PFNGLBINDBUFFERPROC)(GLenum target, GLuint buffer);
+typedef void (APIENTRYP PFNGLBINDVERTEXARRAYPROC)(GLuint array);
+typedef void (APIENTRYP PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
+typedef void (APIENTRYP PFNGLCOMPILESHADERPROC)(GLuint shader);
+typedef GLuint (APIENTRYP PFNGLCREATEPROGRAMPROC)();
+typedef GLuint (APIENTRYP PFNGLCREATESHADERPROC)(GLenum type);
+typedef void (APIENTRYP PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint* buffers);
+typedef void (APIENTRYP PFNGLDELETEPROGRAMPROC)(GLuint program);
+typedef void (APIENTRYP PFNGLDELETESHADERPROC)(GLuint shader);
+typedef void (APIENTRYP PFNGLDELETEVERTEXARRAYSPROC)(GLsizei n, const GLuint* arrays);
+typedef void (APIENTRYP PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint index);
+typedef void (APIENTRYP PFNGLGENBUFFERSPROC)(GLsizei n, GLuint* buffers);
+typedef void (APIENTRYP PFNGLGENERATEMIPMAPPROC)(GLenum target);
+typedef void (APIENTRYP PFNGLGENVERTEXARRAYSPROC)(GLsizei n, GLuint* arrays);
+typedef void (APIENTRYP PFNGLGETPROGRAMINFOLOGPROC)(GLuint program, GLsizei bufSize, GLsizei* length, GLchar* infoLog);
+typedef void (APIENTRYP PFNGLGETPROGRAMIVPROC)(GLuint program, GLenum pname, GLint* params);
+typedef void (APIENTRYP PFNGLGETSHADERINFOLOGPROC)(GLuint shader, GLsizei bufSize, GLsizei* length, GLchar* infoLog);
+typedef void (APIENTRYP PFNGLGETSHADERIVPROC)(GLuint shader, GLenum pname, GLint* params);
+typedef GLint (APIENTRYP PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar* name);
+typedef void (APIENTRYP PFNGLLINKPROGRAMPROC)(GLuint program);
+typedef void (APIENTRYP PFNGLSHADERSOURCEPROC)(GLuint shader, GLsizei count, const GLchar* const* string, const GLint* length);
+typedef void (APIENTRYP PFNGLUNIFORM1FPROC)(GLint location, GLfloat v0);
+typedef void (APIENTRYP PFNGLUNIFORM1IPROC)(GLint location, GLint v0);
+typedef void (APIENTRYP PFNGLUNIFORM3FPROC)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+typedef void (APIENTRYP PFNGLUNIFORM4FPROC)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+typedef void (APIENTRYP PFNGLUNIFORMMATRIX3FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value);
+typedef void (APIENTRYP PFNGLUNIFORMMATRIX4FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value);
+typedef void (APIENTRYP PFNGLUSEPROGRAMPROC)(GLuint program);
+typedef void (APIENTRYP PFNGLVERTEXATTRIBPOINTERPROC)(
+    GLuint index,
+    GLint size,
+    GLenum type,
+    GLboolean normalized,
+    GLsizei stride,
+    const void* pointer);
+#endif
 #endif
 
 namespace renderer::render_gl {
@@ -27,6 +109,7 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexcoord;
 
 uniform mat4 uWorld;
+uniform mat3 uNormalMatrix;
 uniform mat4 uView;
 uniform mat4 uProjection;
 
@@ -34,7 +117,7 @@ out vec3 vWorldNormal;
 out vec2 vTexcoord;
 
 void main() {
-    vWorldNormal = mat3(uWorld) * aNormal;
+    vWorldNormal = uNormalMatrix * aNormal;
     vTexcoord = aTexcoord;
     gl_Position = uProjection * uView * uWorld * vec4(aPosition, 1.0);
 }
@@ -98,6 +181,7 @@ struct GlFunctions {
     PFNGLUNIFORM1IPROC Uniform1i = nullptr;
     PFNGLUNIFORM3FPROC Uniform3f = nullptr;
     PFNGLUNIFORM4FPROC Uniform4f = nullptr;
+    PFNGLUNIFORMMATRIX3FVPROC UniformMatrix3fv = nullptr;
     PFNGLUNIFORMMATRIX4FVPROC UniformMatrix4fv = nullptr;
     PFNGLUSEPROGRAMPROC UseProgram = nullptr;
     PFNGLVERTEXATTRIBPOINTERPROC VertexAttribPointer = nullptr;
@@ -356,12 +440,61 @@ void destroyMeshResource(const GlFunctions& gl, MeshResource& resource) {
     resource.indexCount = 0;
 }
 
+void makeNormalMatrix(const scene_contract::Mat4f& world, float normalMatrix[9]) {
+    const float a00 = world.elements[0];
+    const float a01 = world.elements[4];
+    const float a02 = world.elements[8];
+    const float a10 = world.elements[1];
+    const float a11 = world.elements[5];
+    const float a12 = world.elements[9];
+    const float a20 = world.elements[2];
+    const float a21 = world.elements[6];
+    const float a22 = world.elements[10];
+
+    const float inv00 = a11 * a22 - a12 * a21;
+    const float inv01 = a02 * a21 - a01 * a22;
+    const float inv02 = a01 * a12 - a02 * a11;
+    const float inv10 = a12 * a20 - a10 * a22;
+    const float inv11 = a00 * a22 - a02 * a20;
+    const float inv12 = a02 * a10 - a00 * a12;
+    const float inv20 = a10 * a21 - a11 * a20;
+    const float inv21 = a01 * a20 - a00 * a21;
+    const float inv22 = a00 * a11 - a01 * a10;
+
+    const float determinant = a00 * inv00 + a01 * inv10 + a02 * inv20;
+    if (std::abs(determinant) <= 0.000001F) {
+        normalMatrix[0] = a00;
+        normalMatrix[1] = a10;
+        normalMatrix[2] = a20;
+        normalMatrix[3] = a01;
+        normalMatrix[4] = a11;
+        normalMatrix[5] = a21;
+        normalMatrix[6] = a02;
+        normalMatrix[7] = a12;
+        normalMatrix[8] = a22;
+        return;
+    }
+
+    const float inverseDeterminant = 1.0F / determinant;
+
+    normalMatrix[0] = inv00 * inverseDeterminant;
+    normalMatrix[1] = inv01 * inverseDeterminant;
+    normalMatrix[2] = inv02 * inverseDeterminant;
+    normalMatrix[3] = inv10 * inverseDeterminant;
+    normalMatrix[4] = inv11 * inverseDeterminant;
+    normalMatrix[5] = inv12 * inverseDeterminant;
+    normalMatrix[6] = inv20 * inverseDeterminant;
+    normalMatrix[7] = inv21 * inverseDeterminant;
+    normalMatrix[8] = inv22 * inverseDeterminant;
+}
+
 }  // namespace
 
 struct GlRenderer::Impl {
     GlFunctions gl;
     GLuint program = 0U;
     GLint worldLocation = -1;
+    GLint normalMatrixLocation = -1;
     GLint viewLocation = -1;
     GLint projectionLocation = -1;
     GLint colorLocation = -1;
@@ -434,6 +567,7 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
         !loadFunction(impl->gl.Uniform1i, resolver, userData, "glUniform1i", lastError_) ||
         !loadFunction(impl->gl.Uniform3f, resolver, userData, "glUniform3f", lastError_) ||
         !loadFunction(impl->gl.Uniform4f, resolver, userData, "glUniform4f", lastError_) ||
+        !loadFunction(impl->gl.UniformMatrix3fv, resolver, userData, "glUniformMatrix3fv", lastError_) ||
         !loadFunction(impl->gl.UniformMatrix4fv, resolver, userData, "glUniformMatrix4fv", lastError_) ||
         !loadFunction(impl->gl.UseProgram, resolver, userData, "glUseProgram", lastError_) ||
         !loadFunction(impl->gl.VertexAttribPointer, resolver, userData, "glVertexAttribPointer", lastError_)) {
@@ -446,6 +580,7 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
     }
 
     impl->worldLocation = impl->gl.GetUniformLocation(impl->program, "uWorld");
+    impl->normalMatrixLocation = impl->gl.GetUniformLocation(impl->program, "uNormalMatrix");
     impl->viewLocation = impl->gl.GetUniformLocation(impl->program, "uView");
     impl->projectionLocation = impl->gl.GetUniformLocation(impl->program, "uProjection");
     impl->colorLocation = impl->gl.GetUniformLocation(impl->program, "uBaseColor");
@@ -715,6 +850,8 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
     }
 
     glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
     glClearColor(0.08F, 0.10F, 0.14F, 1.0F);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
@@ -735,7 +872,8 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
     impl_->gl.Uniform1f(impl_->ambientStrengthLocation, packet.light.ambientStrength);
     impl_->gl.Uniform1i(impl_->baseColorTextureLocation, 0);
 
-    for (const auto& item : packet.opaqueItems) {
+    for (const auto& queueItem : packet.opaqueItems) {
+        const auto& item = queueItem.item;
         if (item.meshHandle == scene_contract::kInvalidMeshHandle) {
             continue;
         }
@@ -758,6 +896,9 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
         impl_->gl.BindVertexArray(mesh.vertexArray);
 
         impl_->gl.UniformMatrix4fv(impl_->worldLocation, 1, GL_FALSE, item.transform.world.elements);
+        float normalMatrix[9] {};
+        makeNormalMatrix(item.transform.world, normalMatrix);
+        impl_->gl.UniformMatrix3fv(impl_->normalMatrixLocation, 1, GL_FALSE, normalMatrix);
         impl_->gl.Uniform4f(
             impl_->colorLocation,
             material.baseColor.r,

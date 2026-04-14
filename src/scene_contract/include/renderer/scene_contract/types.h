@@ -102,6 +102,8 @@ struct RenderableItem {
     MeshHandle meshHandle = kInvalidMeshHandle;
     MaterialHandle materialHandle = kInvalidMaterialHandle;
     TransformData transform;
+    Aabb worldBounds {};
+    bool visible = true;
 };
 
 struct FrameScene {

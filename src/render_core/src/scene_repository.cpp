@@ -84,6 +84,7 @@ SceneRepository::ItemId SceneRepository::add(scene_contract::RenderableItem item
     ItemRecord record;
     record.item = std::move(item);
     record.rangeData.worldBounds = transformAabb(record.rangeData.localBounds, record.item.transform);
+    record.item.worldBounds = record.rangeData.worldBounds;
     items_.push_back(std::move(record));
     return items_.size() - 1U;
 }
@@ -121,6 +122,7 @@ void SceneRepository::updateTransform(
 
     items_[id].item.transform = transform;
     items_[id].rangeData.worldBounds = transformAabb(items_[id].rangeData.localBounds, items_[id].item.transform);
+    items_[id].item.worldBounds = items_[id].rangeData.worldBounds;
 }
 
 void SceneRepository::updateLocalBounds(
@@ -132,6 +134,15 @@ void SceneRepository::updateLocalBounds(
 
     items_[id].rangeData.localBounds = localBounds;
     items_[id].rangeData.worldBounds = transformAabb(items_[id].rangeData.localBounds, items_[id].item.transform);
+    items_[id].item.worldBounds = items_[id].rangeData.worldBounds;
+}
+
+void SceneRepository::updateVisible(ItemId id, bool visible) {
+    if (id >= items_.size()) {
+        return;
+    }
+
+    items_[id].item.visible = visible;
 }
 
 ItemRangeData SceneRepository::rangeData(ItemId id) const {

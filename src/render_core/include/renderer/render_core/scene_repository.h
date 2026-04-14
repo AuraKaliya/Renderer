@@ -26,6 +26,7 @@ public:
     void updateMaterialHandle(ItemId id, scene_contract::MaterialHandle materialHandle);
     void updateTransform(ItemId id, const scene_contract::TransformData& transform);
     void updateLocalBounds(ItemId id, const scene_contract::Aabb& localBounds);
+    void updateVisible(ItemId id, bool visible);
 
     [[nodiscard]] ItemRangeData rangeData(ItemId id) const;
     [[nodiscard]] std::vector<ItemRangeData> snapshotRangeData() const;
