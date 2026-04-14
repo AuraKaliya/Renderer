@@ -1,12 +1,16 @@
 #include "viewer_window.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include <QHBoxLayout>
 #include <QFocusEvent>
 #include <QMouseEvent>
 #include <QOpenGLContext>
+#include <QPointF>
 #include <QSurfaceFormat>
 #include <QDebug>
 #include <QWheelEvent>
@@ -139,16 +143,7 @@ constexpr float kOrbitRotateSensitivity = 0.0125F;
 constexpr float kWheelZoomStep = 0.35F;
 constexpr float kPanViewportFactor = 1.0F;
 constexpr float kViewportZoomRayEpsilon = 0.0001F;
-
-float clampUnit(float value) {
-    if (value < 0.0F) {
-        return 0.0F;
-    }
-    if (value > 1.0F) {
-        return 1.0F;
-    }
-    return value;
-}
+constexpr int kViewportClickDragThresholdPixels = 4;
 
 renderer::scene_contract::Vec3f scaleVec3(
     const renderer::scene_contract::Vec3f& value,
@@ -194,31 +189,216 @@ struct CameraFrame {
     renderer::scene_contract::Vec3f up {0.0F, 1.0F, 0.0F};
 };
 
-CameraFrame makeCameraFrame(const OrbitCameraController& cameraController) {
-    const auto orbitCenter = cameraController.orbitCenter();
-    const float distance = cameraController.distance();
-    const float yawRadians = cameraController.yawRadians();
-    const float pitchRadians = cameraController.pitchRadians();
-    const float cosPitch = std::cos(pitchRadians);
-    const float sinPitch = std::sin(pitchRadians);
-
+CameraFrame makeCameraFrame(const renderer::scene_contract::CameraData& camera) {
     CameraFrame frame;
-    frame.position = {
-        orbitCenter.x + distance * cosPitch * std::sin(yawRadians),
-        orbitCenter.y + distance * sinPitch,
-        orbitCenter.z + distance * cosPitch * std::cos(yawRadians)
-    };
-
-    frame.forward = renderer::scene_contract::math::normalize(
-        renderer::scene_contract::math::subtract(orbitCenter, frame.position));
+    frame.position = camera.position;
+    frame.forward = renderer::scene_contract::math::normalize({
+        -camera.view.elements[2],
+        -camera.view.elements[6],
+        -camera.view.elements[10]
+    });
     frame.right = renderer::scene_contract::math::normalize(
-        renderer::scene_contract::math::cross(frame.forward, {0.0F, 1.0F, 0.0F}));
+        {camera.view.elements[0], camera.view.elements[4], camera.view.elements[8]});
     if (renderer::scene_contract::math::length(frame.right) <= kViewportZoomRayEpsilon) {
         frame.right = {1.0F, 0.0F, 0.0F};
     }
     frame.up = renderer::scene_contract::math::normalize(
-        renderer::scene_contract::math::cross(frame.right, frame.forward));
+        {camera.view.elements[1], camera.view.elements[5], camera.view.elements[9]});
+    if (renderer::scene_contract::math::length(frame.up) <= kViewportZoomRayEpsilon) {
+        frame.up = renderer::scene_contract::math::normalize(
+            renderer::scene_contract::math::cross(frame.right, frame.forward));
+    }
     return frame;
+}
+
+struct ViewportRay {
+    renderer::scene_contract::Vec2f viewportPositionNormalized {};
+    renderer::scene_contract::Vec3f origin {};
+    renderer::scene_contract::Vec3f direction {0.0F, 0.0F, -1.0F};
+    renderer::scene_contract::Vec3f cameraForward {0.0F, 0.0F, -1.0F};
+    bool valid = false;
+};
+
+ViewportRay makeViewportRay(
+    const OrbitCameraController& cameraController,
+    int viewportWidth,
+    int viewportHeight,
+    const QPointF& viewportPosition)
+{
+    ViewportRay ray;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+        return ray;
+    }
+
+    const float normalizedX = static_cast<float>(viewportPosition.x()) / static_cast<float>(viewportWidth);
+    const float normalizedY = static_cast<float>(viewportPosition.y()) / static_cast<float>(viewportHeight);
+    if (normalizedX < 0.0F || normalizedX > 1.0F || normalizedY < 0.0F || normalizedY > 1.0F) {
+        return ray;
+    }
+    ray.viewportPositionNormalized = {normalizedX, normalizedY};
+
+    const float ndcX = normalizedX * 2.0F - 1.0F;
+    const float ndcY = 1.0F - normalizedY * 2.0F;
+    const auto camera = cameraController.buildCameraData();
+    const auto cameraFrame = makeCameraFrame(camera);
+    if (std::abs(camera.projection.elements[0]) <= kViewportZoomRayEpsilon
+        || std::abs(camera.projection.elements[5]) <= kViewportZoomRayEpsilon) {
+        return ray;
+    }
+
+    ray.origin = cameraFrame.position;
+    ray.direction = cameraFrame.forward;
+    ray.cameraForward = cameraFrame.forward;
+
+    if (cameraController.projectionMode() == OrbitCameraController::ProjectionMode::perspective) {
+        const auto horizontalOffset = scaleVec3(cameraFrame.right, ndcX / camera.projection.elements[0]);
+        const auto verticalOffset = scaleVec3(cameraFrame.up, ndcY / camera.projection.elements[5]);
+        ray.direction = renderer::scene_contract::math::normalize(
+            renderer::scene_contract::math::add(
+                cameraFrame.forward,
+                renderer::scene_contract::math::add(horizontalOffset, verticalOffset)));
+    } else {
+        ray.origin = renderer::scene_contract::math::add(
+            ray.origin,
+            renderer::scene_contract::math::add(
+                scaleVec3(cameraFrame.right, ndcX / camera.projection.elements[0]),
+                scaleVec3(cameraFrame.up, ndcY / camera.projection.elements[5])));
+    }
+
+    ray.valid = renderer::scene_contract::math::length(ray.direction) > kViewportZoomRayEpsilon;
+    return ray;
+}
+
+bool intersectRayAabb(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::Aabb& bounds,
+    float& hitDistance)
+{
+    if (!bounds.valid) {
+        return false;
+    }
+
+    auto intersectAxis = [](
+        float origin,
+        float direction,
+        float minimum,
+        float maximum,
+        float& nearDistance,
+        float& farDistance) {
+        if (std::abs(direction) <= kViewportZoomRayEpsilon) {
+            return origin >= minimum && origin <= maximum;
+        }
+
+        float axisNearDistance = (minimum - origin) / direction;
+        float axisFarDistance = (maximum - origin) / direction;
+        if (axisNearDistance > axisFarDistance) {
+            std::swap(axisNearDistance, axisFarDistance);
+        }
+
+        nearDistance = std::max(nearDistance, axisNearDistance);
+        farDistance = std::min(farDistance, axisFarDistance);
+        return nearDistance <= farDistance;
+    };
+
+    float nearDistance = 0.0F;
+    float farDistance = std::numeric_limits<float>::max();
+    if (!intersectAxis(rayOrigin.x, rayDirection.x, bounds.min.x, bounds.max.x, nearDistance, farDistance)
+        || !intersectAxis(rayOrigin.y, rayDirection.y, bounds.min.y, bounds.max.y, nearDistance, farDistance)
+        || !intersectAxis(rayOrigin.z, rayDirection.z, bounds.min.z, bounds.max.z, nearDistance, farDistance)) {
+        return false;
+    }
+
+    hitDistance = nearDistance;
+    return farDistance >= 0.0F;
+}
+
+renderer::scene_contract::Vec3f transformPoint(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec3f& point)
+{
+    return {
+        matrix.elements[0] * point.x + matrix.elements[4] * point.y + matrix.elements[8] * point.z + matrix.elements[12],
+        matrix.elements[1] * point.x + matrix.elements[5] * point.y + matrix.elements[9] * point.z + matrix.elements[13],
+        matrix.elements[2] * point.x + matrix.elements[6] * point.y + matrix.elements[10] * point.z + matrix.elements[14]
+    };
+}
+
+bool intersectRayTriangle(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::Vec3f& vertex0,
+    const renderer::scene_contract::Vec3f& vertex1,
+    const renderer::scene_contract::Vec3f& vertex2,
+    float& hitDistance)
+{
+    const auto edge1 = renderer::scene_contract::math::subtract(vertex1, vertex0);
+    const auto edge2 = renderer::scene_contract::math::subtract(vertex2, vertex0);
+    const auto pvec = renderer::scene_contract::math::cross(rayDirection, edge2);
+    const float determinant = renderer::scene_contract::math::dot(edge1, pvec);
+    if (std::abs(determinant) <= kViewportZoomRayEpsilon) {
+        return false;
+    }
+
+    const float inverseDeterminant = 1.0F / determinant;
+    const auto tvec = renderer::scene_contract::math::subtract(rayOrigin, vertex0);
+    const float u = renderer::scene_contract::math::dot(tvec, pvec) * inverseDeterminant;
+    if (u < 0.0F || u > 1.0F) {
+        return false;
+    }
+
+    const auto qvec = renderer::scene_contract::math::cross(tvec, edge1);
+    const float v = renderer::scene_contract::math::dot(rayDirection, qvec) * inverseDeterminant;
+    if (v < 0.0F || u + v > 1.0F) {
+        return false;
+    }
+
+    const float distance = renderer::scene_contract::math::dot(edge2, qvec) * inverseDeterminant;
+    if (distance < 0.0F) {
+        return false;
+    }
+
+    hitDistance = distance;
+    return true;
+}
+
+bool intersectRayMesh(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::MeshData& mesh,
+    const renderer::scene_contract::Mat4f& world,
+    float& hitDistance)
+{
+    bool hit = false;
+    float nearestDistance = std::numeric_limits<float>::max();
+
+    for (std::size_t index = 0; index + 2U < mesh.indices.size(); index += 3U) {
+        const auto index0 = mesh.indices[index];
+        const auto index1 = mesh.indices[index + 1U];
+        const auto index2 = mesh.indices[index + 2U];
+        if (index0 >= mesh.vertices.size() || index1 >= mesh.vertices.size() || index2 >= mesh.vertices.size()) {
+            continue;
+        }
+
+        float triangleHitDistance = 0.0F;
+        if (!intersectRayTriangle(
+                rayOrigin,
+                rayDirection,
+                transformPoint(world, mesh.vertices[index0].position),
+                transformPoint(world, mesh.vertices[index1].position),
+                transformPoint(world, mesh.vertices[index2].position),
+                triangleHitDistance)) {
+            continue;
+        }
+
+        if (triangleHitDistance < nearestDistance) {
+            nearestDistance = triangleHitDistance;
+            hit = true;
+        }
+    }
+
+    hitDistance = nearestDistance;
+    return hit;
 }
 
 renderer::render_gl::ProcAddress resolveGlProc(const char* name, void* userData) {
@@ -1289,62 +1469,33 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
 
 viewport_zoom::AnchorSample ViewerWindow::Viewport::sampleViewportZoomAnchor(const QPointF& viewportPosition) const {
     viewport_zoom::AnchorSample sample;
-    if (width() <= 0 || height() <= 0) {
+    const auto ray = makeViewportRay(cameraController_, width(), height(), viewportPosition);
+    sample.viewportPositionNormalized = ray.viewportPositionNormalized;
+    if (!ray.valid) {
         return sample;
     }
 
-    const float normalizedX = clampUnit(static_cast<float>(viewportPosition.x()) / static_cast<float>(width()));
-    const float normalizedY = clampUnit(static_cast<float>(viewportPosition.y()) / static_cast<float>(height()));
-    sample.viewportPositionNormalized = {normalizedX, normalizedY};
-
-    const auto cameraFrame = makeCameraFrame(cameraController_);
     const auto planePoint = orbitCenter();
-    const auto planeNormal = cameraFrame.forward;
+    const auto planeNormal = ray.cameraForward;
     if (renderer::scene_contract::math::length(planeNormal) <= kViewportZoomRayEpsilon) {
         return sample;
     }
 
-    const float ndcX = normalizedX * 2.0F - 1.0F;
-    const float ndcY = 1.0F - normalizedY * 2.0F;
-    const float aspectRatio = static_cast<float>(width()) / static_cast<float>(height());
-
-    renderer::scene_contract::Vec3f rayOrigin = cameraFrame.position;
-    renderer::scene_contract::Vec3f rayDirection = cameraFrame.forward;
-
-    if (projectionMode() == OrbitCameraController::ProjectionMode::perspective) {
-        const float tanHalfFov = std::tan(
-            verticalFovDegrees() * 0.5F * renderer::scene_contract::math::kPi / 180.0F);
-        const auto horizontalOffset = scaleVec3(cameraFrame.right, ndcX * aspectRatio * tanHalfFov);
-        const auto verticalOffset = scaleVec3(cameraFrame.up, ndcY * tanHalfFov);
-        rayDirection = renderer::scene_contract::math::normalize(
-            renderer::scene_contract::math::add(
-                cameraFrame.forward,
-                renderer::scene_contract::math::add(horizontalOffset, verticalOffset)));
-    } else {
-        const float halfHeight = orthographicHeight() * 0.5F;
-        const float halfWidth = halfHeight * aspectRatio;
-        rayOrigin = renderer::scene_contract::math::add(
-            rayOrigin,
-            renderer::scene_contract::math::add(
-                scaleVec3(cameraFrame.right, ndcX * halfWidth),
-                scaleVec3(cameraFrame.up, ndcY * halfHeight)));
-    }
-
-    const float denominator = renderer::scene_contract::math::dot(rayDirection, planeNormal);
+    const float denominator = renderer::scene_contract::math::dot(ray.direction, planeNormal);
     if (std::abs(denominator) <= kViewportZoomRayEpsilon) {
         return sample;
     }
 
     const float distanceToPlane = renderer::scene_contract::math::dot(
-        renderer::scene_contract::math::subtract(planePoint, rayOrigin),
+        renderer::scene_contract::math::subtract(planePoint, ray.origin),
         planeNormal) / denominator;
     if (distanceToPlane <= 0.0F) {
         return sample;
     }
 
     sample.worldPoint = renderer::scene_contract::math::add(
-        rayOrigin,
-        scaleVec3(rayDirection, distanceToPlane));
+        ray.origin,
+        scaleVec3(ray.direction, distanceToPlane));
     sample.valid = true;
     return sample;
 }
@@ -1513,6 +1664,9 @@ void ViewerWindow::Viewport::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         rotating_ = true;
         panning_ = false;
+        leftButtonTracking_ = true;
+        leftButtonDragged_ = false;
+        mousePressPosition_ = event->pos();
         lastMousePosition_ = event->pos();
         setFocus(Qt::MouseFocusReason);
         event->accept();
@@ -1522,6 +1676,8 @@ void ViewerWindow::Viewport::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::RightButton) {
         panning_ = true;
         rotating_ = false;
+        leftButtonTracking_ = false;
+        leftButtonDragged_ = false;
         lastMousePosition_ = event->pos();
         setFocus(Qt::MouseFocusReason);
         event->accept();
@@ -1532,7 +1688,17 @@ void ViewerWindow::Viewport::mousePressEvent(QMouseEvent* event) {
 }
 
 void ViewerWindow::Viewport::mouseMoveEvent(QMouseEvent* event) {
-    if (rotating_ && (event->buttons() & Qt::LeftButton)) {
+    if (rotating_ && leftButtonTracking_ && (event->buttons() & Qt::LeftButton)) {
+        if (!leftButtonDragged_) {
+            const QPoint totalDelta = event->pos() - mousePressPosition_;
+            if (totalDelta.manhattanLength() <= kViewportClickDragThresholdPixels) {
+                event->accept();
+                return;
+            }
+
+            leftButtonDragged_ = true;
+        }
+
         const QPoint delta = event->pos() - lastMousePosition_;
         lastMousePosition_ = event->pos();
 
@@ -1576,7 +1742,23 @@ void ViewerWindow::Viewport::mouseMoveEvent(QMouseEvent* event) {
 
 void ViewerWindow::Viewport::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        const QPoint totalDelta = event->pos() - mousePressPosition_;
+        const bool clickSelection =
+            leftButtonTracking_
+            && !leftButtonDragged_
+            && totalDelta.manhattanLength() <= kViewportClickDragThresholdPixels;
+
         rotating_ = false;
+        leftButtonTracking_ = false;
+        leftButtonDragged_ = false;
+
+        if (clickSelection) {
+            const int pickedIndex = pickObjectAt(event->localPos());
+            if (pickedIndex >= 0) {
+                selectObjectAt(pickedIndex);
+            }
+        }
+
         event->accept();
         return;
     }
@@ -1593,12 +1775,16 @@ void ViewerWindow::Viewport::mouseReleaseEvent(QMouseEvent* event) {
 void ViewerWindow::Viewport::leaveEvent(QEvent* event) {
     rotating_ = false;
     panning_ = false;
+    leftButtonTracking_ = false;
+    leftButtonDragged_ = false;
     QOpenGLWidget::leaveEvent(event);
 }
 
 void ViewerWindow::Viewport::focusOutEvent(QFocusEvent* event) {
     rotating_ = false;
     panning_ = false;
+    leftButtonTracking_ = false;
+    leftButtonDragged_ = false;
     QOpenGLWidget::focusOutEvent(event);
 }
 
@@ -1642,6 +1828,21 @@ renderer::scene_contract::TransformData ViewerWindow::Viewport::currentObjectTra
         sceneObject.offsetZ,
         sceneObject.scale,
         sceneObject.rotationSpeed);
+}
+
+renderer::scene_contract::RenderableVisualState ViewerWindow::Viewport::currentObjectVisualState(int index) const {
+    renderer::scene_contract::RenderableVisualState visualState;
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
+        return visualState;
+    }
+
+    const auto objectId = sceneObjects_[index].parametricObjectDescriptor.metadata.id;
+    if (objectId != 0U && objectId == selectionState_.activeObjectId) {
+        visualState.interaction = renderer::scene_contract::InteractionVisualState::active;
+    } else if (objectId != 0U && objectId == selectionState_.selectedObjectId) {
+        visualState.interaction = renderer::scene_contract::InteractionVisualState::selected;
+    }
+    return visualState;
 }
 
 void ViewerWindow::Viewport::notifyCameraStateChanged() {
@@ -1831,6 +2032,62 @@ int ViewerWindow::Viewport::findObjectIndexById(renderer::parametric_model::Para
     return -1;
 }
 
+int ViewerWindow::Viewport::pickObjectAt(const QPointF& viewportPosition) {
+    const auto ray = makeViewportRay(cameraController_, width(), height(), viewportPosition);
+    if (!ray.valid) {
+        return -1;
+    }
+
+    int pickedIndex = -1;
+    float pickedDistance = std::numeric_limits<float>::max();
+    for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
+        const auto& sceneObject = sceneObjects_[index];
+        const auto transform = currentObjectTransform(index);
+        repository_.updateVisible(sceneObject.itemId, sceneObject.visible);
+        repository_.updateVisualState(sceneObject.itemId, currentObjectVisualState(index));
+        repository_.updateTransform(sceneObject.itemId, transform);
+
+        if (!sceneObject.visible) {
+            continue;
+        }
+
+        float hitDistance = 0.0F;
+        const auto bounds = repository_.rangeData(sceneObject.itemId).worldBounds;
+        if (!intersectRayAabb(ray.origin, ray.direction, bounds, hitDistance)) {
+            continue;
+        }
+
+        if (!intersectRayMesh(
+                ray.origin,
+                ray.direction,
+                sceneObject.meshData,
+                transform.world,
+                hitDistance)) {
+            continue;
+        }
+
+        if (hitDistance < pickedDistance) {
+            pickedDistance = hitDistance;
+            pickedIndex = index;
+        }
+    }
+
+    return pickedIndex;
+}
+
+void ViewerWindow::Viewport::selectObjectAt(int index) {
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
+        return;
+    }
+
+    const auto objectId = sceneObjects_[index].parametricObjectDescriptor.metadata.id;
+    selectionState_.selectedObjectId = objectId;
+    selectionState_.activeObjectId = objectId;
+    normalizeSelectionState();
+    notifyCameraStateChanged();
+    update();
+}
+
 bool ViewerWindow::Viewport::featureBelongsToObject(
     renderer::parametric_model::ParametricObjectId objectId,
     renderer::parametric_model::ParametricFeatureId featureId) const
@@ -1940,6 +2197,7 @@ void ViewerWindow::Viewport::updateSceneTransforms() {
     for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         auto& sceneObject = sceneObjects_[index];
         repository_.updateVisible(sceneObject.itemId, sceneObject.visible);
+        repository_.updateVisualState(sceneObject.itemId, currentObjectVisualState(index));
         repository_.updateTransform(
             sceneObject.itemId,
             currentObjectTransform(index));

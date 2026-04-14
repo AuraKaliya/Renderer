@@ -1,6 +1,9 @@
 add_library(render_gl
     include/renderer/render_gl/gl_renderer.h
+    src/gl_functions.h
     src/gl_renderer.cpp
+    src/shader_library.h
+    src/shader_library.cpp
 )
 
 target_include_directories(render_gl

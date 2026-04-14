@@ -27,6 +27,7 @@ public:
     void updateTransform(ItemId id, const scene_contract::TransformData& transform);
     void updateLocalBounds(ItemId id, const scene_contract::Aabb& localBounds);
     void updateVisible(ItemId id, bool visible);
+    void updateVisualState(ItemId id, const scene_contract::RenderableVisualState& visualState);
 
     [[nodiscard]] ItemRangeData rangeData(ItemId id) const;
     [[nodiscard]] std::vector<ItemRangeData> snapshotRangeData() const;

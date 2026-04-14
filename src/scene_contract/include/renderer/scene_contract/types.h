@@ -86,6 +86,17 @@ struct TransformData {
     Mat4f world {};
 };
 
+enum class InteractionVisualState : std::uint8_t {
+    normal,
+    selected,
+    active,
+    hovered
+};
+
+struct RenderableVisualState {
+    InteractionVisualState interaction = InteractionVisualState::normal;
+};
+
 struct CameraData {
     Mat4f view {};
     Mat4f projection {};
@@ -102,6 +113,7 @@ struct RenderableItem {
     MeshHandle meshHandle = kInvalidMeshHandle;
     MaterialHandle materialHandle = kInvalidMaterialHandle;
     TransformData transform;
+    RenderableVisualState visual;
     Aabb worldBounds {};
     bool visible = true;
 };

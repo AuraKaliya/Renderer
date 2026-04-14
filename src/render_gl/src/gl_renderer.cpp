@@ -6,186 +6,16 @@
 #include <string>
 #include <unordered_map>
 
+#include "gl_functions.h"
 #include "renderer/scene_contract/types.h"
-
-#if defined(RENDERER_HAS_OPENGL)
-#if defined(_WIN32)
-#include <windows.h>
-#endif
-#include <GL/gl.h>
-#if __has_include(<GL/glext.h>)
-#include <GL/glext.h>
-#else
-using GLchar = char;
-using GLsizeiptr = std::ptrdiff_t;
-
-#ifndef APIENTRY
-#define APIENTRY
-#endif
-#ifndef APIENTRYP
-#define APIENTRYP APIENTRY *
-#endif
-
-#ifndef GL_ARRAY_BUFFER
-#define GL_ARRAY_BUFFER 0x8892
-#endif
-#ifndef GL_ELEMENT_ARRAY_BUFFER
-#define GL_ELEMENT_ARRAY_BUFFER 0x8893
-#endif
-#ifndef GL_FRAGMENT_SHADER
-#define GL_FRAGMENT_SHADER 0x8B30
-#endif
-#ifndef GL_VERTEX_SHADER
-#define GL_VERTEX_SHADER 0x8B31
-#endif
-#ifndef GL_COMPILE_STATUS
-#define GL_COMPILE_STATUS 0x8B81
-#endif
-#ifndef GL_LINK_STATUS
-#define GL_LINK_STATUS 0x8B82
-#endif
-#ifndef GL_INFO_LOG_LENGTH
-#define GL_INFO_LOG_LENGTH 0x8B84
-#endif
-#ifndef GL_STATIC_DRAW
-#define GL_STATIC_DRAW 0x88E4
-#endif
-#ifndef GL_TEXTURE0
-#define GL_TEXTURE0 0x84C0
-#endif
-#ifndef GL_RGBA8
-#define GL_RGBA8 0x8058
-#endif
-
-typedef void (APIENTRYP PFNGLACTIVETEXTUREPROC)(GLenum texture);
-typedef void (APIENTRYP PFNGLATTACHSHADERPROC)(GLuint program, GLuint shader);
-typedef void (APIENTRYP PFNGLBINDBUFFERPROC)(GLenum target, GLuint buffer);
-typedef void (APIENTRYP PFNGLBINDVERTEXARRAYPROC)(GLuint array);
-typedef void (APIENTRYP PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
-typedef void (APIENTRYP PFNGLCOMPILESHADERPROC)(GLuint shader);
-typedef GLuint (APIENTRYP PFNGLCREATEPROGRAMPROC)();
-typedef GLuint (APIENTRYP PFNGLCREATESHADERPROC)(GLenum type);
-typedef void (APIENTRYP PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint* buffers);
-typedef void (APIENTRYP PFNGLDELETEPROGRAMPROC)(GLuint program);
-typedef void (APIENTRYP PFNGLDELETESHADERPROC)(GLuint shader);
-typedef void (APIENTRYP PFNGLDELETEVERTEXARRAYSPROC)(GLsizei n, const GLuint* arrays);
-typedef void (APIENTRYP PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint index);
-typedef void (APIENTRYP PFNGLGENBUFFERSPROC)(GLsizei n, GLuint* buffers);
-typedef void (APIENTRYP PFNGLGENERATEMIPMAPPROC)(GLenum target);
-typedef void (APIENTRYP PFNGLGENVERTEXARRAYSPROC)(GLsizei n, GLuint* arrays);
-typedef void (APIENTRYP PFNGLGETPROGRAMINFOLOGPROC)(GLuint program, GLsizei bufSize, GLsizei* length, GLchar* infoLog);
-typedef void (APIENTRYP PFNGLGETPROGRAMIVPROC)(GLuint program, GLenum pname, GLint* params);
-typedef void (APIENTRYP PFNGLGETSHADERINFOLOGPROC)(GLuint shader, GLsizei bufSize, GLsizei* length, GLchar* infoLog);
-typedef void (APIENTRYP PFNGLGETSHADERIVPROC)(GLuint shader, GLenum pname, GLint* params);
-typedef GLint (APIENTRYP PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar* name);
-typedef void (APIENTRYP PFNGLLINKPROGRAMPROC)(GLuint program);
-typedef void (APIENTRYP PFNGLSHADERSOURCEPROC)(GLuint shader, GLsizei count, const GLchar* const* string, const GLint* length);
-typedef void (APIENTRYP PFNGLUNIFORM1FPROC)(GLint location, GLfloat v0);
-typedef void (APIENTRYP PFNGLUNIFORM1IPROC)(GLint location, GLint v0);
-typedef void (APIENTRYP PFNGLUNIFORM3FPROC)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
-typedef void (APIENTRYP PFNGLUNIFORM4FPROC)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
-typedef void (APIENTRYP PFNGLUNIFORMMATRIX3FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value);
-typedef void (APIENTRYP PFNGLUNIFORMMATRIX4FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value);
-typedef void (APIENTRYP PFNGLUSEPROGRAMPROC)(GLuint program);
-typedef void (APIENTRYP PFNGLVERTEXATTRIBPOINTERPROC)(
-    GLuint index,
-    GLint size,
-    GLenum type,
-    GLboolean normalized,
-    GLsizei stride,
-    const void* pointer);
-#endif
-#endif
+#include "shader_library.h"
 
 namespace renderer::render_gl {
 
 #if defined(RENDERER_HAS_OPENGL)
 namespace {
 
-constexpr auto kVertexShaderSource = R"(
-#version 330 core
-layout(location = 0) in vec3 aPosition;
-layout(location = 1) in vec3 aNormal;
-layout(location = 2) in vec2 aTexcoord;
-
-uniform mat4 uWorld;
-uniform mat3 uNormalMatrix;
-uniform mat4 uView;
-uniform mat4 uProjection;
-
-out vec3 vWorldNormal;
-out vec2 vTexcoord;
-
-void main() {
-    vWorldNormal = uNormalMatrix * aNormal;
-    vTexcoord = aTexcoord;
-    gl_Position = uProjection * uView * uWorld * vec4(aPosition, 1.0);
-}
-)";
-
-constexpr auto kFragmentShaderSource = R"(
-#version 330 core
-out vec4 FragColor;
-
-uniform vec4 uBaseColor;
-uniform vec3 uLightDirection;
-uniform vec3 uLightColor;
-uniform float uAmbientStrength;
-uniform sampler2D uBaseColorTexture;
-uniform int uUseBaseColorTexture;
-
-in vec3 vWorldNormal;
-in vec2 vTexcoord;
-
-void main() {
-    vec3 normal = normalize(vWorldNormal);
-    vec3 lightDir = normalize(-uLightDirection);
-    float diffuse = max(dot(normal, lightDir), 0.0);
-    vec4 albedo = uBaseColor;
-    if (uUseBaseColorTexture == 1) {
-        albedo *= texture(uBaseColorTexture, vTexcoord);
-    }
-    vec3 ambient = uAmbientStrength * albedo.rgb;
-    vec3 litColor = ambient + diffuse * albedo.rgb * uLightColor;
-    FragColor = vec4(litColor, albedo.a);
-}
-)";
-
 static_assert(sizeof(scene_contract::VertexPNT) == sizeof(float) * 8);
-
-struct GlFunctions {
-    PFNGLACTIVETEXTUREPROC ActiveTexture = nullptr;
-    PFNGLATTACHSHADERPROC AttachShader = nullptr;
-    PFNGLBINDBUFFERPROC BindBuffer = nullptr;
-    PFNGLBINDVERTEXARRAYPROC BindVertexArray = nullptr;
-    PFNGLBUFFERDATAPROC BufferData = nullptr;
-    PFNGLCOMPILESHADERPROC CompileShader = nullptr;
-    PFNGLCREATEPROGRAMPROC CreateProgram = nullptr;
-    PFNGLCREATESHADERPROC CreateShader = nullptr;
-    PFNGLDELETEBUFFERSPROC DeleteBuffers = nullptr;
-    PFNGLDELETEPROGRAMPROC DeleteProgram = nullptr;
-    PFNGLDELETESHADERPROC DeleteShader = nullptr;
-    PFNGLDELETEVERTEXARRAYSPROC DeleteVertexArrays = nullptr;
-    PFNGLENABLEVERTEXATTRIBARRAYPROC EnableVertexAttribArray = nullptr;
-    PFNGLGENBUFFERSPROC GenBuffers = nullptr;
-    PFNGLGENERATEMIPMAPPROC GenerateMipmap = nullptr;
-    PFNGLGENVERTEXARRAYSPROC GenVertexArrays = nullptr;
-    PFNGLGETPROGRAMINFOLOGPROC GetProgramInfoLog = nullptr;
-    PFNGLGETPROGRAMIVPROC GetProgramiv = nullptr;
-    PFNGLGETSHADERINFOLOGPROC GetShaderInfoLog = nullptr;
-    PFNGLGETSHADERIVPROC GetShaderiv = nullptr;
-    PFNGLGETUNIFORMLOCATIONPROC GetUniformLocation = nullptr;
-    PFNGLLINKPROGRAMPROC LinkProgram = nullptr;
-    PFNGLSHADERSOURCEPROC ShaderSource = nullptr;
-    PFNGLUNIFORM1FPROC Uniform1f = nullptr;
-    PFNGLUNIFORM1IPROC Uniform1i = nullptr;
-    PFNGLUNIFORM3FPROC Uniform3f = nullptr;
-    PFNGLUNIFORM4FPROC Uniform4f = nullptr;
-    PFNGLUNIFORMMATRIX3FVPROC UniformMatrix3fv = nullptr;
-    PFNGLUNIFORMMATRIX4FVPROC UniformMatrix4fv = nullptr;
-    PFNGLUSEPROGRAMPROC UseProgram = nullptr;
-    PFNGLVERTEXATTRIBPOINTERPROC VertexAttribPointer = nullptr;
-};
 
 template <typename T>
 bool loadFunction(
@@ -201,81 +31,6 @@ bool loadFunction(
     }
     target = reinterpret_cast<T>(address);
     return true;
-}
-
-GLuint compileShader(
-    const GlFunctions& gl,
-    GLenum type,
-    const char* source,
-    std::string& error) {
-    const auto shader = gl.CreateShader(type);
-    if (shader == 0U) {
-        error = "glCreateShader failed.";
-        return 0U;
-    }
-
-    gl.ShaderSource(shader, 1, &source, nullptr);
-    gl.CompileShader(shader);
-
-    GLint compileStatus = 0;
-    gl.GetShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
-    if (compileStatus == GL_TRUE) {
-        return shader;
-    }
-
-    GLint logLength = 0;
-    gl.GetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
-    std::string log(static_cast<std::size_t>(logLength), '\0');
-    if (logLength > 0) {
-        gl.GetShaderInfoLog(shader, logLength, nullptr, log.data());
-    }
-    gl.DeleteShader(shader);
-    error = "Shader compilation failed: " + log;
-    return 0U;
-}
-
-GLuint createProgram(const GlFunctions& gl, std::string& error) {
-    const auto vertexShader = compileShader(gl, GL_VERTEX_SHADER, kVertexShaderSource, error);
-    if (vertexShader == 0U) {
-        return 0U;
-    }
-
-    const auto fragmentShader = compileShader(gl, GL_FRAGMENT_SHADER, kFragmentShaderSource, error);
-    if (fragmentShader == 0U) {
-        gl.DeleteShader(vertexShader);
-        return 0U;
-    }
-
-    const auto program = gl.CreateProgram();
-    if (program == 0U) {
-        gl.DeleteShader(vertexShader);
-        gl.DeleteShader(fragmentShader);
-        error = "glCreateProgram failed.";
-        return 0U;
-    }
-
-    gl.AttachShader(program, vertexShader);
-    gl.AttachShader(program, fragmentShader);
-    gl.LinkProgram(program);
-
-    gl.DeleteShader(vertexShader);
-    gl.DeleteShader(fragmentShader);
-
-    GLint linkStatus = 0;
-    gl.GetProgramiv(program, GL_LINK_STATUS, &linkStatus);
-    if (linkStatus == GL_TRUE) {
-        return program;
-    }
-
-    GLint logLength = 0;
-    gl.GetProgramiv(program, GL_INFO_LOG_LENGTH, &logLength);
-    std::string log(static_cast<std::size_t>(logLength), '\0');
-    if (logLength > 0) {
-        gl.GetProgramInfoLog(program, logLength, nullptr, log.data());
-    }
-    gl.DeleteProgram(program);
-    error = "Program link failed: " + log;
-    return 0U;
 }
 
 struct MeshResource {
@@ -488,21 +243,38 @@ void makeNormalMatrix(const scene_contract::Mat4f& world, float normalMatrix[9])
     normalMatrix[8] = inv22 * inverseDeterminant;
 }
 
+struct SelectionFeedbackStyle {
+    float width = 0.0F;
+    scene_contract::ColorRgba surfaceColor {};
+    scene_contract::ColorRgba outlineColor {};
+};
+
+bool hasSelectionFeedback(scene_contract::InteractionVisualState interaction) {
+    return interaction == scene_contract::InteractionVisualState::selected ||
+        interaction == scene_contract::InteractionVisualState::active ||
+        interaction == scene_contract::InteractionVisualState::hovered;
+}
+
+SelectionFeedbackStyle selectionFeedbackStyle(scene_contract::InteractionVisualState interaction) {
+    switch (interaction) {
+    case scene_contract::InteractionVisualState::active:
+        return {0.018F, {1.0F, 0.82F, 0.22F, 0.32F}, {1.0F, 0.82F, 0.22F, 1.0F}};
+    case scene_contract::InteractionVisualState::hovered:
+        return {0.014F, {0.92F, 0.96F, 1.0F, 0.24F}, {0.92F, 0.96F, 1.0F, 1.0F}};
+    case scene_contract::InteractionVisualState::selected:
+        return {0.015F, {0.12F, 0.78F, 1.0F, 0.28F}, {0.12F, 0.78F, 1.0F, 1.0F}};
+    case scene_contract::InteractionVisualState::normal:
+        break;
+    }
+
+    return {};
+}
+
 }  // namespace
 
 struct GlRenderer::Impl {
     GlFunctions gl;
-    GLuint program = 0U;
-    GLint worldLocation = -1;
-    GLint normalMatrixLocation = -1;
-    GLint viewLocation = -1;
-    GLint projectionLocation = -1;
-    GLint colorLocation = -1;
-    GLint baseColorTextureLocation = -1;
-    GLint useBaseColorTextureLocation = -1;
-    GLint lightDirectionLocation = -1;
-    GLint lightColorLocation = -1;
-    GLint ambientStrengthLocation = -1;
+    ShaderLibrary shaderLibrary;
     scene_contract::MeshHandle nextMeshHandle = 1U;
     scene_contract::MaterialHandle nextMaterialHandle = 1U;
     scene_contract::TextureHandle nextTextureHandle = 1U;
@@ -574,21 +346,9 @@ bool GlRenderer::initialize(ProcResolver resolver, void* userData) {
         return false;
     }
 
-    impl->program = createProgram(impl->gl, lastError_);
-    if (impl->program == 0U) {
+    if (!impl->shaderLibrary.initialize(impl->gl, lastError_)) {
         return false;
     }
-
-    impl->worldLocation = impl->gl.GetUniformLocation(impl->program, "uWorld");
-    impl->normalMatrixLocation = impl->gl.GetUniformLocation(impl->program, "uNormalMatrix");
-    impl->viewLocation = impl->gl.GetUniformLocation(impl->program, "uView");
-    impl->projectionLocation = impl->gl.GetUniformLocation(impl->program, "uProjection");
-    impl->colorLocation = impl->gl.GetUniformLocation(impl->program, "uBaseColor");
-    impl->baseColorTextureLocation = impl->gl.GetUniformLocation(impl->program, "uBaseColorTexture");
-    impl->useBaseColorTextureLocation = impl->gl.GetUniformLocation(impl->program, "uUseBaseColorTexture");
-    impl->lightDirectionLocation = impl->gl.GetUniformLocation(impl->program, "uLightDirection");
-    impl->lightColorLocation = impl->gl.GetUniformLocation(impl->program, "uLightColor");
-    impl->ambientStrengthLocation = impl->gl.GetUniformLocation(impl->program, "uAmbientStrength");
 
     impl->initialized = true;
     impl_ = impl.release();
@@ -615,9 +375,7 @@ void GlRenderer::shutdown() {
     impl_->materials.clear();
     impl_->textures.clear();
 
-    if (impl_->program != 0U) {
-        impl_->gl.DeleteProgram(impl_->program);
-    }
+    impl_->shaderLibrary.shutdown(impl_->gl);
 #endif
 
     delete impl_;
@@ -855,22 +613,23 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
     glClearColor(0.08F, 0.10F, 0.14F, 1.0F);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-    impl_->gl.UseProgram(impl_->program);
+    const auto& litMesh = impl_->shaderLibrary.litMesh();
+    impl_->gl.UseProgram(litMesh.program);
 
-    impl_->gl.UniformMatrix4fv(impl_->viewLocation, 1, GL_FALSE, packet.camera.view.elements);
-    impl_->gl.UniformMatrix4fv(impl_->projectionLocation, 1, GL_FALSE, packet.camera.projection.elements);
+    impl_->gl.UniformMatrix4fv(litMesh.view, 1, GL_FALSE, packet.camera.view.elements);
+    impl_->gl.UniformMatrix4fv(litMesh.projection, 1, GL_FALSE, packet.camera.projection.elements);
     impl_->gl.Uniform3f(
-        impl_->lightDirectionLocation,
+        litMesh.lightDirection,
         packet.light.direction.x,
         packet.light.direction.y,
         packet.light.direction.z);
     impl_->gl.Uniform3f(
-        impl_->lightColorLocation,
+        litMesh.lightColor,
         packet.light.color.x,
         packet.light.color.y,
         packet.light.color.z);
-    impl_->gl.Uniform1f(impl_->ambientStrengthLocation, packet.light.ambientStrength);
-    impl_->gl.Uniform1i(impl_->baseColorTextureLocation, 0);
+    impl_->gl.Uniform1f(litMesh.ambientStrength, packet.light.ambientStrength);
+    impl_->gl.Uniform1i(litMesh.baseColorTexture, 0);
 
     for (const auto& queueItem : packet.opaqueItems) {
         const auto& item = queueItem.item;
@@ -895,12 +654,12 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
         const auto& material = materialIterator->second.material;
         impl_->gl.BindVertexArray(mesh.vertexArray);
 
-        impl_->gl.UniformMatrix4fv(impl_->worldLocation, 1, GL_FALSE, item.transform.world.elements);
+        impl_->gl.UniformMatrix4fv(litMesh.world, 1, GL_FALSE, item.transform.world.elements);
         float normalMatrix[9] {};
         makeNormalMatrix(item.transform.world, normalMatrix);
-        impl_->gl.UniformMatrix3fv(impl_->normalMatrixLocation, 1, GL_FALSE, normalMatrix);
+        impl_->gl.UniformMatrix3fv(litMesh.normalMatrix, 1, GL_FALSE, normalMatrix);
         impl_->gl.Uniform4f(
-            impl_->colorLocation,
+            litMesh.baseColor,
             material.baseColor.r,
             material.baseColor.g,
             material.baseColor.b,
@@ -918,12 +677,11 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
             }
         }
 
-        impl_->gl.Uniform1i(impl_->useBaseColorTextureLocation, useTexture ? 1 : 0);
+        impl_->gl.Uniform1i(litMesh.useBaseColorTexture, useTexture ? 1 : 0);
         if (!useTexture) {
             impl_->gl.ActiveTexture(GL_TEXTURE0);
             ::glBindTexture(GL_TEXTURE_2D, 0);
         }
-
 
         ::glDrawElements(
             GL_TRIANGLES,
@@ -937,6 +695,151 @@ RenderStats GlRenderer::render(const render_core::FramePacket& packet) {
 
     impl_->gl.ActiveTexture(GL_TEXTURE0);
     ::glBindTexture(GL_TEXTURE_2D, 0);
+
+    bool hasSelectionItems = false;
+    for (const auto& queueItem : packet.opaqueItems) {
+        if (hasSelectionFeedback(queueItem.item.visual.interaction)) {
+            hasSelectionItems = true;
+            break;
+        }
+    }
+
+    if (hasSelectionItems) {
+        ::glEnable(GL_STENCIL_TEST);
+        ::glClear(GL_STENCIL_BUFFER_BIT);
+        ::glStencilMask(0xFF);
+        ::glStencilFunc(GL_ALWAYS, 1, 0xFF);
+        ::glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        ::glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        ::glDepthMask(GL_FALSE);
+        ::glEnable(GL_DEPTH_TEST);
+        ::glDepthFunc(GL_LEQUAL);
+
+        const auto& selectionMask = impl_->shaderLibrary.selectionMask();
+        impl_->gl.UseProgram(selectionMask.program);
+        impl_->gl.UniformMatrix4fv(selectionMask.view, 1, GL_FALSE, packet.camera.view.elements);
+        impl_->gl.UniformMatrix4fv(selectionMask.projection, 1, GL_FALSE, packet.camera.projection.elements);
+
+        for (const auto& queueItem : packet.opaqueItems) {
+            const auto& item = queueItem.item;
+            if (!hasSelectionFeedback(item.visual.interaction)) {
+                continue;
+            }
+
+            const auto meshIterator = impl_->meshes.find(item.meshHandle);
+            if (meshIterator == impl_->meshes.end()) {
+                continue;
+            }
+
+            const auto& mesh = meshIterator->second;
+            impl_->gl.BindVertexArray(mesh.vertexArray);
+            impl_->gl.UniformMatrix4fv(selectionMask.world, 1, GL_FALSE, item.transform.world.elements);
+            ::glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+
+            ++stats.drawCalls;
+            stats.triangleCount += static_cast<std::uint32_t>(mesh.indexCount / 3U);
+        }
+
+        ::glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        ::glStencilMask(0x00);
+        ::glStencilFunc(GL_EQUAL, 1, 0xFF);
+        ::glEnable(GL_DEPTH_TEST);
+        ::glDepthMask(GL_FALSE);
+        ::glEnable(GL_BLEND);
+        ::glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        const auto& selectionOutline = impl_->shaderLibrary.selectionOutline();
+        impl_->gl.UseProgram(selectionOutline.program);
+        impl_->gl.UniformMatrix4fv(selectionOutline.view, 1, GL_FALSE, packet.camera.view.elements);
+        impl_->gl.UniformMatrix4fv(selectionOutline.projection, 1, GL_FALSE, packet.camera.projection.elements);
+        impl_->gl.Uniform3f(
+            selectionOutline.lightDirection,
+            packet.light.direction.x,
+            packet.light.direction.y,
+            packet.light.direction.z);
+        impl_->gl.Uniform3f(
+            selectionOutline.lightColor,
+            packet.light.color.x,
+            packet.light.color.y,
+            packet.light.color.z);
+        impl_->gl.Uniform1f(selectionOutline.ambientStrength, packet.light.ambientStrength);
+
+        for (const auto& queueItem : packet.opaqueItems) {
+            const auto& item = queueItem.item;
+            if (!hasSelectionFeedback(item.visual.interaction)) {
+                continue;
+            }
+
+            const auto meshIterator = impl_->meshes.find(item.meshHandle);
+            if (meshIterator == impl_->meshes.end()) {
+                continue;
+            }
+
+            const auto style = selectionFeedbackStyle(item.visual.interaction);
+            const auto& mesh = meshIterator->second;
+            impl_->gl.BindVertexArray(mesh.vertexArray);
+            impl_->gl.UniformMatrix4fv(selectionOutline.world, 1, GL_FALSE, item.transform.world.elements);
+            float normalMatrix[9] {};
+            makeNormalMatrix(item.transform.world, normalMatrix);
+            impl_->gl.UniformMatrix3fv(selectionOutline.normalMatrix, 1, GL_FALSE, normalMatrix);
+            impl_->gl.Uniform1f(selectionOutline.outlineWidth, 0.0F);
+            impl_->gl.Uniform4f(
+                selectionOutline.outlineColor,
+                style.surfaceColor.r,
+                style.surfaceColor.g,
+                style.surfaceColor.b,
+                style.surfaceColor.a);
+            ::glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+
+            ++stats.drawCalls;
+            stats.triangleCount += static_cast<std::uint32_t>(mesh.indexCount / 3U);
+        }
+
+        ::glDisable(GL_BLEND);
+        ::glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
+        ::glEnable(GL_CULL_FACE);
+        ::glCullFace(GL_FRONT);
+
+        for (const auto& queueItem : packet.opaqueItems) {
+            const auto& item = queueItem.item;
+            if (!hasSelectionFeedback(item.visual.interaction)) {
+                continue;
+            }
+
+            const auto meshIterator = impl_->meshes.find(item.meshHandle);
+            if (meshIterator == impl_->meshes.end()) {
+                continue;
+            }
+
+            const auto style = selectionFeedbackStyle(item.visual.interaction);
+            const auto& mesh = meshIterator->second;
+            impl_->gl.BindVertexArray(mesh.vertexArray);
+            impl_->gl.UniformMatrix4fv(selectionOutline.world, 1, GL_FALSE, item.transform.world.elements);
+            float normalMatrix[9] {};
+            makeNormalMatrix(item.transform.world, normalMatrix);
+            impl_->gl.UniformMatrix3fv(selectionOutline.normalMatrix, 1, GL_FALSE, normalMatrix);
+            impl_->gl.Uniform1f(selectionOutline.outlineWidth, style.width);
+            impl_->gl.Uniform4f(
+                selectionOutline.outlineColor,
+                style.outlineColor.r,
+                style.outlineColor.g,
+                style.outlineColor.b,
+                style.outlineColor.a);
+            ::glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+
+            ++stats.drawCalls;
+            stats.triangleCount += static_cast<std::uint32_t>(mesh.indexCount / 3U);
+        }
+
+        ::glCullFace(GL_BACK);
+        ::glDisable(GL_CULL_FACE);
+        ::glStencilMask(0xFF);
+        ::glDisable(GL_STENCIL_TEST);
+        ::glEnable(GL_DEPTH_TEST);
+        ::glDepthFunc(GL_LESS);
+        ::glDepthMask(GL_TRUE);
+    }
+
     impl_->gl.BindVertexArray(0);
     impl_->gl.UseProgram(0);
     lastError_.clear();

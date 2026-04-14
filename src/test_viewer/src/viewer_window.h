@@ -125,6 +125,7 @@ private:
         struct SceneObject;
 
         [[nodiscard]] renderer::scene_contract::TransformData currentObjectTransform(int index) const;
+        [[nodiscard]] renderer::scene_contract::RenderableVisualState currentObjectVisualState(int index) const;
         [[nodiscard]] viewport_zoom::AnchorSample sampleViewportZoomAnchor(const QPointF& viewportPosition) const;
         void applyViewportZoom(const QPointF& viewportPosition, float deltaDistance);
         void markModelChanged(model_change_view::ChangeKind changeKind);
@@ -157,6 +158,8 @@ private:
         [[nodiscard]] const renderer::parametric_model::PrimitiveDescriptor* findObjectPrimitive(
             const renderer::parametric_model::ParametricObjectDescriptor& descriptor) const;
         [[nodiscard]] int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
+        [[nodiscard]] int pickObjectAt(const QPointF& viewportPosition);
+        void selectObjectAt(int index);
         [[nodiscard]] bool featureBelongsToObject(
             renderer::parametric_model::ParametricObjectId objectId,
             renderer::parametric_model::ParametricFeatureId featureId) const;
@@ -205,6 +208,9 @@ private:
         std::unique_ptr<QOpenGLFramebufferObject> offscreenTarget_;
         std::function<void()> cameraStateChangedCallback_;
         QPoint lastMousePosition_;
+        QPoint mousePressPosition_;
+        bool leftButtonTracking_ = false;
+        bool leftButtonDragged_ = false;
         bool rotating_ = false;
         bool panning_ = false;
         QTimer frameTimer_;

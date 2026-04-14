@@ -145,6 +145,17 @@ void SceneRepository::updateVisible(ItemId id, bool visible) {
     items_[id].item.visible = visible;
 }
 
+void SceneRepository::updateVisualState(
+    ItemId id,
+    const scene_contract::RenderableVisualState& visualState)
+{
+    if (id >= items_.size()) {
+        return;
+    }
+
+    items_[id].item.visual = visualState;
+}
+
 ItemRangeData SceneRepository::rangeData(ItemId id) const {
     if (id >= items_.size()) {
         return {};
