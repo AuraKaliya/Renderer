@@ -90,7 +90,13 @@ SceneObjectDefaults makeDynamicSceneObjectDefaults(
 renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObject(
     const renderer::parametric_model::PrimitiveDescriptor& basePrimitive)
 {
-    auto descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricObject(basePrimitive);
+    auto descriptor = basePrimitive.kind == renderer::parametric_model::PrimitiveKind::sphere
+        ? renderer::parametric_model::PrimitiveFactory::makeParametricSphereFromCenterRadius(
+            {0.0F, 0.0F, 0.0F},
+            basePrimitive.sphere.radius,
+            basePrimitive.sphere.slices,
+            basePrimitive.sphere.stacks)
+        : renderer::parametric_model::PrimitiveFactory::makeParametricObject(basePrimitive);
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeMirrorFeature());
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeLinearArrayFeature());
     return descriptor;
@@ -644,6 +650,16 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::sphereStacksChanged, this, [this](int stacks) {
         viewport_->setSphereStacks(static_cast<std::uint32_t>(stacks));
     });
+    connect(controlPanel_, &ViewerControlPanel::sphereConstructionModeChanged, this, [this](int mode) {
+        viewport_->setSphereConstructionMode(
+            static_cast<renderer::parametric_model::SphereSpec::ConstructionMode>(mode));
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereCenterChanged, this, [this](float x, float y, float z) {
+        viewport_->setSphereCenter({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereSurfacePointChanged, this, [this](float x, float y, float z) {
+        viewport_->setSphereSurfacePoint({x, y, z});
+    });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
     });
@@ -1107,6 +1123,100 @@ void ViewerWindow::Viewport::setSphereStacks(std::uint32_t stacks) {
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
+void ViewerWindow::Viewport::setSphereConstructionMode(
+    renderer::parametric_model::SphereSpec::ConstructionMode mode)
+{
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
+    auto& sphere = primitive->sphere;
+    const auto center = resolvePointNode(descriptor, sphere.center, {});
+    sphere.center = ensurePointNode(descriptor, sphere.center, center);
+
+    if (mode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
+        const renderer::scene_contract::Vec3f surfacePoint {
+            center.x + sphere.radius,
+            center.y,
+            center.z
+        };
+        sphere.surfacePoint = ensurePointNode(descriptor, sphere.surfacePoint, surfacePoint);
+    } else if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
+        const auto surfacePoint = resolvePointNode(
+            descriptor,
+            sphere.surfacePoint,
+            {center.x + sphere.radius, center.y, center.z});
+        sphere.radius = renderer::scene_contract::math::length(
+            renderer::scene_contract::math::subtract(surfacePoint, center));
+    }
+
+    sphere.constructionMode = mode;
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereCenter(const renderer::scene_contract::Vec3f& center) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
+    auto& sphere = primitive->sphere;
+    sphere.center = ensurePointNode(descriptor, sphere.center, center);
+    if (auto* centerNode = findPointNodeById(descriptor, sphere.center.id); centerNode != nullptr) {
+        centerNode->point.position = center;
+    }
+
+    if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
+        const auto surfacePoint = resolvePointNode(
+            descriptor,
+            sphere.surfacePoint,
+            {center.x + sphere.radius, center.y, center.z});
+        sphere.radius = renderer::scene_contract::math::length(
+            renderer::scene_contract::math::subtract(surfacePoint, center));
+    }
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereSurfacePoint(const renderer::scene_contract::Vec3f& surfacePoint) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
+    auto& sphere = primitive->sphere;
+    sphere.constructionMode = renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point;
+    const auto center = resolvePointNode(descriptor, sphere.center, {});
+    sphere.center = ensurePointNode(descriptor, sphere.center, center);
+    sphere.surfacePoint = ensurePointNode(descriptor, sphere.surfacePoint, surfacePoint);
+    if (auto* surfaceNode = findPointNodeById(descriptor, sphere.surfacePoint.id); surfaceNode != nullptr) {
+        surfaceNode->point.position = surfacePoint;
+    }
+    sphere.radius = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(surfacePoint, center));
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
 void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
     if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
         return;
@@ -1421,6 +1531,7 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
         if (primitive != nullptr) {
             objectState.primitive = *primitive;
         }
+        objectState.nodes = descriptor.nodes;
         objectState.visible = objectVisible(index);
         objectState.rotationSpeed = objectRotationSpeed(index);
         objectState.color = objectColor(index);
@@ -2021,6 +2132,54 @@ const renderer::parametric_model::PrimitiveDescriptor* ViewerWindow::Viewport::f
         return nullptr;
     }
     return &feature->primitive;
+}
+
+renderer::parametric_model::ParametricNodeDescriptor* ViewerWindow::Viewport::findPointNodeById(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::ParametricNodeId nodeId)
+{
+    for (auto& node : descriptor.nodes) {
+        if (node.id == nodeId && node.kind == renderer::parametric_model::ParametricNodeKind::point) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+const renderer::parametric_model::ParametricNodeDescriptor* ViewerWindow::Viewport::findPointNodeById(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::ParametricNodeId nodeId) const
+{
+    for (const auto& node : descriptor.nodes) {
+        if (node.id == nodeId && node.kind == renderer::parametric_model::ParametricNodeKind::point) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+renderer::scene_contract::Vec3f ViewerWindow::Viewport::resolvePointNode(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::NodeReference reference,
+    const renderer::scene_contract::Vec3f& fallback) const
+{
+    const auto* node = findPointNodeById(descriptor, reference.id);
+    return node != nullptr ? node->point.position : fallback;
+}
+
+renderer::parametric_model::NodeReference ViewerWindow::Viewport::ensurePointNode(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::NodeReference reference,
+    const renderer::scene_contract::Vec3f& fallback)
+{
+    if (findPointNodeById(descriptor, reference.id) != nullptr) {
+        return reference;
+    }
+
+    auto node = renderer::parametric_model::PrimitiveFactory::makePointNode(fallback);
+    const auto nodeId = node.id;
+    descriptor.nodes.push_back(node);
+    return {nodeId};
 }
 
 int ViewerWindow::Viewport::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {

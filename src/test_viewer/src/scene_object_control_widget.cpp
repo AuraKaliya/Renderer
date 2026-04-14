@@ -25,6 +25,18 @@ QDoubleSpinBox* makeFloatSpinBox(
     return spinBox;
 }
 
+const renderer::parametric_model::ParametricNodeDescriptor* findPointNode(
+    const std::vector<renderer::parametric_model::ParametricNodeDescriptor>& nodes,
+    renderer::parametric_model::NodeReference reference)
+{
+    for (const auto& node : nodes) {
+        if (node.id == reference.id && node.kind == renderer::parametric_model::ParametricNodeKind::point) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 SceneObjectControlWidget::SceneObjectControlWidget(
@@ -136,6 +148,19 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         sphereStacksSpinBox_ = new QSpinBox(groupBox_);
         sphereStacksSpinBox_->setRange(2, 128);
         sphereStacksSpinBox_->setSingleStep(1);
+        sphereConstructionModeComboBox_ = new QComboBox(groupBox_);
+        sphereConstructionModeComboBox_->addItem(
+            "Center + Radius",
+            static_cast<int>(renderer::parametric_model::SphereSpec::ConstructionMode::center_radius));
+        sphereConstructionModeComboBox_->addItem(
+            "Center + Surface Point",
+            static_cast<int>(renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point));
+        sphereCenterXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        sphereCenterYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        sphereCenterZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        sphereSurfacePointXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        sphereSurfacePointYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        sphereSurfacePointZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
 
         connect(sphereRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
             emit sphereRadiusChanged(static_cast<float>(value));
@@ -146,10 +171,51 @@ SceneObjectControlWidget::SceneObjectControlWidget(
         connect(sphereStacksSpinBox_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int value) {
             emit sphereStacksChanged(value);
         });
+        connect(sphereConstructionModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+            emit sphereConstructionModeChanged(sphereConstructionModeComboBox_->itemData(index).toInt());
+        });
 
+        auto emitSphereCenter = [this]() {
+            emit sphereCenterChanged(
+                static_cast<float>(sphereCenterXSpinBox_->value()),
+                static_cast<float>(sphereCenterYSpinBox_->value()),
+                static_cast<float>(sphereCenterZSpinBox_->value()));
+        };
+        auto emitSphereSurfacePoint = [this]() {
+            emit sphereSurfacePointChanged(
+                static_cast<float>(sphereSurfacePointXSpinBox_->value()),
+                static_cast<float>(sphereSurfacePointYSpinBox_->value()),
+                static_cast<float>(sphereSurfacePointZSpinBox_->value()));
+        };
+        connect(sphereCenterXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereCenter](double) {
+            emitSphereCenter();
+        });
+        connect(sphereCenterYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereCenter](double) {
+            emitSphereCenter();
+        });
+        connect(sphereCenterZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereCenter](double) {
+            emitSphereCenter();
+        });
+        connect(sphereSurfacePointXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereSurfacePoint](double) {
+            emitSphereSurfacePoint();
+        });
+        connect(sphereSurfacePointYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereSurfacePoint](double) {
+            emitSphereSurfacePoint();
+        });
+        connect(sphereSurfacePointZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitSphereSurfacePoint](double) {
+            emitSphereSurfacePoint();
+        });
+
+        primitiveLayout->addRow("Mode", sphereConstructionModeComboBox_);
         primitiveLayout->addRow("Radius", sphereRadiusSpinBox_);
         primitiveLayout->addRow("Slices", sphereSlicesSpinBox_);
         primitiveLayout->addRow("Stacks", sphereStacksSpinBox_);
+        primitiveLayout->addRow("Center X", sphereCenterXSpinBox_);
+        primitiveLayout->addRow("Center Y", sphereCenterYSpinBox_);
+        primitiveLayout->addRow("Center Z", sphereCenterZSpinBox_);
+        primitiveLayout->addRow("Surface X", sphereSurfacePointXSpinBox_);
+        primitiveLayout->addRow("Surface Y", sphereSurfacePointYSpinBox_);
+        primitiveLayout->addRow("Surface Z", sphereSurfacePointZSpinBox_);
     }
 
     mirrorEnabledCheckBox_ = new QCheckBox(groupBox_);
@@ -299,16 +365,62 @@ void SceneObjectControlWidget::setCylinderSpec(const renderer::parametric_model:
     cylinderSegmentsSpinBox_->setValue(static_cast<int>(spec.segments));
 }
 
-void SceneObjectControlWidget::setSphereSpec(const renderer::parametric_model::SphereSpec& spec) {
-    if (sphereRadiusSpinBox_ == nullptr || sphereSlicesSpinBox_ == nullptr || sphereStacksSpinBox_ == nullptr) {
+void SceneObjectControlWidget::setSphereSpec(
+    const renderer::parametric_model::SphereSpec& spec,
+    const std::vector<renderer::parametric_model::ParametricNodeDescriptor>& nodes)
+{
+    if (sphereRadiusSpinBox_ == nullptr
+        || sphereSlicesSpinBox_ == nullptr
+        || sphereStacksSpinBox_ == nullptr
+        || sphereConstructionModeComboBox_ == nullptr
+        || sphereCenterXSpinBox_ == nullptr
+        || sphereCenterYSpinBox_ == nullptr
+        || sphereCenterZSpinBox_ == nullptr
+        || sphereSurfacePointXSpinBox_ == nullptr
+        || sphereSurfacePointYSpinBox_ == nullptr
+        || sphereSurfacePointZSpinBox_ == nullptr) {
         return;
     }
 
     const QSignalBlocker radiusBlocker(sphereRadiusSpinBox_);
     const QSignalBlocker slicesBlocker(sphereSlicesSpinBox_);
     const QSignalBlocker stacksBlocker(sphereStacksSpinBox_);
+    const QSignalBlocker modeBlocker(sphereConstructionModeComboBox_);
+    const QSignalBlocker centerXBlocker(sphereCenterXSpinBox_);
+    const QSignalBlocker centerYBlocker(sphereCenterYSpinBox_);
+    const QSignalBlocker centerZBlocker(sphereCenterZSpinBox_);
+    const QSignalBlocker surfacePointXBlocker(sphereSurfacePointXSpinBox_);
+    const QSignalBlocker surfacePointYBlocker(sphereSurfacePointYSpinBox_);
+    const QSignalBlocker surfacePointZBlocker(sphereSurfacePointZSpinBox_);
 
     sphereRadiusSpinBox_->setValue(spec.radius);
     sphereSlicesSpinBox_->setValue(static_cast<int>(spec.slices));
     sphereStacksSpinBox_->setValue(static_cast<int>(spec.stacks));
+    const int modeIndex = sphereConstructionModeComboBox_->findData(static_cast<int>(spec.constructionMode));
+    if (modeIndex >= 0) {
+        sphereConstructionModeComboBox_->setCurrentIndex(modeIndex);
+    }
+
+    renderer::scene_contract::Vec3f center {};
+    if (const auto* centerNode = findPointNode(nodes, spec.center); centerNode != nullptr) {
+        center = centerNode->point.position;
+    }
+    renderer::scene_contract::Vec3f surfacePoint {center.x + spec.radius, center.y, center.z};
+    if (const auto* surfaceNode = findPointNode(nodes, spec.surfacePoint); surfaceNode != nullptr) {
+        surfacePoint = surfaceNode->point.position;
+    }
+
+    sphereCenterXSpinBox_->setValue(center.x);
+    sphereCenterYSpinBox_->setValue(center.y);
+    sphereCenterZSpinBox_->setValue(center.z);
+    sphereSurfacePointXSpinBox_->setValue(surfacePoint.x);
+    sphereSurfacePointYSpinBox_->setValue(surfacePoint.y);
+    sphereSurfacePointZSpinBox_->setValue(surfacePoint.z);
+
+    const bool usesSurfacePoint =
+        spec.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point;
+    sphereRadiusSpinBox_->setEnabled(!usesSurfacePoint);
+    sphereSurfacePointXSpinBox_->setEnabled(usesSurfacePoint);
+    sphereSurfacePointYSpinBox_->setEnabled(usesSurfacePoint);
+    sphereSurfacePointZSpinBox_->setEnabled(usesSurfacePoint);
 }

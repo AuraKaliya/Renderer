@@ -408,6 +408,15 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(objectWidgets_[2], &SceneObjectControlWidget::sphereStacksChanged, this, [this](int stacks) {
         emit sphereStacksChanged(stacks);
     });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereConstructionModeChanged, this, [this](int mode) {
+        emit sphereConstructionModeChanged(mode);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereCenterChanged, this, [this](float x, float y, float z) {
+        emit sphereCenterChanged(x, y, z);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereSurfacePointChanged, this, [this](float x, float y, float z) {
+        emit sphereSurfacePointChanged(x, y, z);
+    });
 
     lightingWidget_ = new LightingControlWidget(sceneTab.content);
     connect(lightingWidget_, &LightingControlWidget::ambientStrengthChanged, this, [this](float strength) {
@@ -655,7 +664,7 @@ void ViewerControlPanel::refreshObjectInspector() {
         objectWidget->setCylinderSpec(objectState->primitive.cylinder);
         break;
     case renderer::parametric_model::PrimitiveKind::sphere:
-        objectWidget->setSphereSpec(objectState->primitive.sphere);
+        objectWidget->setSphereSpec(objectState->primitive.sphere, objectState->nodes);
         break;
     }
 

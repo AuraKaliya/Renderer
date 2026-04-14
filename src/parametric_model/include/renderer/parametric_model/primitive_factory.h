@@ -13,6 +13,28 @@ enum class PrimitiveKind : std::uint8_t {
     sphere
 };
 
+using ParametricNodeId = std::uint32_t;
+using ParametricObjectId = std::uint32_t;
+using ParametricFeatureId = std::uint32_t;
+
+struct NodeReference {
+    ParametricNodeId id = 0U;
+};
+
+enum class ParametricNodeKind : std::uint8_t {
+    point
+};
+
+struct PointNodeDescriptor {
+    scene_contract::Vec3f position {};
+};
+
+struct ParametricNodeDescriptor {
+    ParametricNodeId id = 0U;
+    ParametricNodeKind kind = ParametricNodeKind::point;
+    PointNodeDescriptor point {};
+};
+
 struct BoxSpec {
     float width = 1.0F;
     float height = 1.0F;
@@ -29,6 +51,13 @@ struct SphereSpec {
     float radius = 0.5F;
     std::uint32_t slices = 24U;
     std::uint32_t stacks = 16U;
+    enum class ConstructionMode : std::uint8_t {
+        center_radius,
+        center_surface_point
+    };
+    ConstructionMode constructionMode = ConstructionMode::center_radius;
+    NodeReference center {};
+    NodeReference surfacePoint {};
 };
 
 struct PrimitiveDescriptor {
@@ -54,9 +83,6 @@ struct LinearArrayOperatorSpec {
     scene_contract::Vec3f offset {1.0F, 0.0F, 0.0F};
 };
 
-using ParametricObjectId = std::uint32_t;
-using ParametricFeatureId = std::uint32_t;
-
 enum class FeatureKind : std::uint8_t {
     primitive,
     mirror,
@@ -81,10 +107,14 @@ struct FeatureDescriptor {
 struct ParametricObjectDescriptor {
     ParametricObjectMetadata metadata {};
     std::vector<FeatureDescriptor> features;
+    std::vector<ParametricNodeDescriptor> nodes;
 };
 
 class PrimitiveFactory {
 public:
+    [[nodiscard]] static ParametricNodeDescriptor makePointNode(
+        const scene_contract::Vec3f& position);
+
     [[nodiscard]] static PrimitiveDescriptor makeBoxDescriptor(
         float width,
         float height,
@@ -109,6 +139,18 @@ public:
 
     [[nodiscard]] static ParametricObjectDescriptor makeParametricObject(
         const PrimitiveDescriptor& basePrimitive);
+
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromCenterRadius(
+        const scene_contract::Vec3f& center,
+        float radius,
+        std::uint32_t slices = 24U,
+        std::uint32_t stacks = 16U);
+
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromCenterSurfacePoint(
+        const scene_contract::Vec3f& center,
+        const scene_contract::Vec3f& surfacePoint,
+        std::uint32_t slices = 24U,
+        std::uint32_t stacks = 16U);
 
     [[nodiscard]] static scene_contract::MeshData build(const PrimitiveDescriptor& descriptor);
     [[nodiscard]] static scene_contract::MeshData build(const ParametricObjectDescriptor& descriptor);

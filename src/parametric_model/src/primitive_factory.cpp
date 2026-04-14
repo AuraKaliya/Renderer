@@ -21,6 +21,11 @@ ParametricFeatureId nextParametricFeatureId() {
     return nextId++;
 }
 
+ParametricNodeId nextParametricNodeId() {
+    static ParametricNodeId nextId = 1U;
+    return nextId++;
+}
+
 renderer::scene_contract::VertexPNT makeVertex(
     float px,
     float py,
@@ -110,6 +115,56 @@ scene_contract::Vec3f addVec3(
         left.y + right.y,
         left.z + right.z
     };
+}
+
+scene_contract::Vec3f subtractVec3(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    return {
+        left.x - right.x,
+        left.y - right.y,
+        left.z - right.z
+    };
+}
+
+float lengthVec3(const scene_contract::Vec3f& value) {
+    return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+}
+
+void translateMesh(scene_contract::MeshData& mesh, const scene_contract::Vec3f& offset) {
+    if (offset.x == 0.0F && offset.y == 0.0F && offset.z == 0.0F) {
+        return;
+    }
+
+    for (auto& vertex : mesh.vertices) {
+        vertex.position = addVec3(vertex.position, offset);
+    }
+    mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
+}
+
+const ParametricNodeDescriptor* findNodeById(
+    const std::vector<ParametricNodeDescriptor>& nodes,
+    ParametricNodeId id)
+{
+    for (const auto& node : nodes) {
+        if (node.id == id) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+scene_contract::Vec3f resolvePointNode(
+    const std::vector<ParametricNodeDescriptor>& nodes,
+    const NodeReference& reference,
+    const scene_contract::Vec3f& fallback)
+{
+    const auto* node = findNodeById(nodes, reference.id);
+    if (node == nullptr || node->kind != ParametricNodeKind::point) {
+        return fallback;
+    }
+    return node->point.position;
 }
 
 scene_contract::Vec3f mirrorPosition(
@@ -399,7 +454,53 @@ scene_contract::MeshData buildSphereMesh(const SphereSpec& spec) {
     return mesh;
 }
 
+scene_contract::MeshData buildSphereMesh(
+    SphereSpec spec,
+    const std::vector<ParametricNodeDescriptor>& nodes)
+{
+    scene_contract::Vec3f center = resolvePointNode(nodes, spec.center, {});
+    if (spec.constructionMode == SphereSpec::ConstructionMode::center_surface_point) {
+        const scene_contract::Vec3f defaultSurfacePoint = {
+            center.x + spec.radius,
+            center.y,
+            center.z
+        };
+        const auto surfacePoint = resolvePointNode(nodes, spec.surfacePoint, defaultSurfacePoint);
+        spec.radius = lengthVec3(subtractVec3(surfacePoint, center));
+    }
+
+    auto mesh = buildSphereMesh(normalizeSphereSpec(spec));
+    translateMesh(mesh, center);
+    return mesh;
+}
+
+scene_contract::MeshData buildPrimitiveMesh(
+    const PrimitiveDescriptor& descriptor,
+    const std::vector<ParametricNodeDescriptor>& nodes)
+{
+    switch (descriptor.kind) {
+    case PrimitiveKind::box:
+        return buildBoxMesh(normalizeBoxSpec(descriptor.box));
+    case PrimitiveKind::cylinder:
+        return buildCylinderMesh(normalizeCylinderSpec(descriptor.cylinder));
+    case PrimitiveKind::sphere:
+        return buildSphereMesh(normalizeSphereSpec(descriptor.sphere), nodes);
+    }
+
+    return {};
+}
+
 }  // namespace
+
+ParametricNodeDescriptor PrimitiveFactory::makePointNode(
+    const scene_contract::Vec3f& position)
+{
+    ParametricNodeDescriptor node;
+    node.id = nextParametricNodeId();
+    node.kind = ParametricNodeKind::point;
+    node.point.position = position;
+    return node;
+}
 
 PrimitiveDescriptor PrimitiveFactory::makeBoxDescriptor(
     float width,
@@ -474,17 +575,46 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricObject(
     return descriptor;
 }
 
-scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& descriptor) {
-    switch (descriptor.kind) {
-    case PrimitiveKind::box:
-        return buildBoxMesh(normalizeBoxSpec(descriptor.box));
-    case PrimitiveKind::cylinder:
-        return buildCylinderMesh(normalizeCylinderSpec(descriptor.cylinder));
-    case PrimitiveKind::sphere:
-        return buildSphereMesh(normalizeSphereSpec(descriptor.sphere));
+ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromCenterRadius(
+    const scene_contract::Vec3f& center,
+    float radius,
+    std::uint32_t slices,
+    std::uint32_t stacks)
+{
+    auto descriptor = makeParametricObject(makeSphereDescriptor(radius, slices, stacks));
+    auto centerNode = makePointNode(center);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.sphere.constructionMode = SphereSpec::ConstructionMode::center_radius;
+        primitiveFeature->primitive.sphere.center = {centerNode.id};
     }
+    descriptor.nodes.push_back(centerNode);
+    return descriptor;
+}
 
-    return {};
+ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromCenterSurfacePoint(
+    const scene_contract::Vec3f& center,
+    const scene_contract::Vec3f& surfacePoint,
+    std::uint32_t slices,
+    std::uint32_t stacks)
+{
+    const float radius = lengthVec3(subtractVec3(surfacePoint, center));
+    auto descriptor = makeParametricObject(makeSphereDescriptor(radius, slices, stacks));
+    auto centerNode = makePointNode(center);
+    auto surfaceNode = makePointNode(surfacePoint);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.sphere.constructionMode = SphereSpec::ConstructionMode::center_surface_point;
+        primitiveFeature->primitive.sphere.center = {centerNode.id};
+        primitiveFeature->primitive.sphere.surfacePoint = {surfaceNode.id};
+    }
+    descriptor.nodes.push_back(centerNode);
+    descriptor.nodes.push_back(surfaceNode);
+    return descriptor;
+}
+
+scene_contract::MeshData PrimitiveFactory::build(const PrimitiveDescriptor& descriptor) {
+    return buildPrimitiveMesh(descriptor, {});
 }
 
 scene_contract::MeshData PrimitiveFactory::build(const ParametricObjectDescriptor& descriptor) {
@@ -498,7 +628,7 @@ scene_contract::MeshData PrimitiveFactory::build(const ParametricObjectDescripto
 
         switch (feature.kind) {
         case FeatureKind::primitive:
-            mesh = build(feature.primitive);
+            mesh = buildPrimitiveMesh(feature.primitive, descriptor.nodes);
             hasBasePrimitive = true;
             break;
         case FeatureKind::mirror:

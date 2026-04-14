@@ -41,6 +41,7 @@ public:
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
         renderer::parametric_model::PrimitiveDescriptor primitive {};
+        std::vector<renderer::parametric_model::ParametricNodeDescriptor> nodes;
         bool visible = true;
         float rotationSpeed = 0.0F;
         renderer::scene_contract::ColorRgba color {};
@@ -115,6 +116,9 @@ signals:
     void sphereRadiusChanged(float radius);
     void sphereSlicesChanged(int slices);
     void sphereStacksChanged(int stacks);
+    void sphereConstructionModeChanged(int mode);
+    void sphereCenterChanged(float x, float y, float z);
+    void sphereSurfacePointChanged(float x, float y, float z);
 
 private:
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);

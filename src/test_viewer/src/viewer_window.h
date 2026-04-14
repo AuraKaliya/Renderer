@@ -79,6 +79,9 @@ private:
         void setSphereRadius(float radius);
         void setSphereSlices(std::uint32_t slices);
         void setSphereStacks(std::uint32_t stacks);
+        void setSphereConstructionMode(renderer::parametric_model::SphereSpec::ConstructionMode mode);
+        void setSphereCenter(const renderer::scene_contract::Vec3f& center);
+        void setSphereSurfacePoint(const renderer::scene_contract::Vec3f& surfacePoint);
         void setObjectMirrorEnabled(int index, bool enabled);
         void setObjectMirrorAxis(int index, renderer::parametric_model::Axis axis);
         void setObjectMirrorPlaneOffset(int index, float planeOffset);
@@ -157,6 +160,20 @@ private:
             renderer::parametric_model::ParametricObjectDescriptor& descriptor);
         [[nodiscard]] const renderer::parametric_model::PrimitiveDescriptor* findObjectPrimitive(
             const renderer::parametric_model::ParametricObjectDescriptor& descriptor) const;
+        renderer::parametric_model::ParametricNodeDescriptor* findPointNodeById(
+            renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::ParametricNodeId nodeId);
+        [[nodiscard]] const renderer::parametric_model::ParametricNodeDescriptor* findPointNodeById(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::ParametricNodeId nodeId) const;
+        [[nodiscard]] renderer::scene_contract::Vec3f resolvePointNode(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::NodeReference reference,
+            const renderer::scene_contract::Vec3f& fallback) const;
+        renderer::parametric_model::NodeReference ensurePointNode(
+            renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+            renderer::parametric_model::NodeReference reference,
+            const renderer::scene_contract::Vec3f& fallback);
         [[nodiscard]] int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
         [[nodiscard]] int pickObjectAt(const QPointF& viewportPosition);
         void selectObjectAt(int index);
