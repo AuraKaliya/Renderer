@@ -94,6 +94,10 @@ private:
             int index,
             renderer::parametric_model::ParametricFeatureId featureId,
             bool enabled);
+        void setObjectNodePosition(
+            int index,
+            renderer::parametric_model::ParametricNodeId nodeId,
+            const renderer::scene_contract::Vec3f& position);
         void addObject(renderer::parametric_model::PrimitiveKind kind);
         void removeSelectedObject();
         void setSelectedObject(renderer::parametric_model::ParametricObjectId objectId);

@@ -8,6 +8,7 @@
 class QLabel;
 class QListWidget;
 class QCheckBox;
+class QDoubleSpinBox;
 class QPushButton;
 
 #include "camera_control_widget.h"
@@ -38,6 +39,31 @@ public:
         bool enabled = true;
     };
 
+    struct UnitPanelState {
+        renderer::parametric_model::ParametricUnitId id = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricUnitKind kind = renderer::parametric_model::ParametricUnitKind::primitive_generator;
+        renderer::parametric_model::ParametricUnitRole role = renderer::parametric_model::ParametricUnitRole::generator;
+        renderer::parametric_model::ParametricConstructionKind constructionKind =
+            renderer::parametric_model::ParametricConstructionKind::box_center_size;
+        bool enabled = true;
+    };
+
+    struct UnitInputPanelState {
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricInputKind kind = renderer::parametric_model::ParametricInputKind::float_value;
+        renderer::parametric_model::ParametricInputSemantic semantic = renderer::parametric_model::ParametricInputSemantic::radius;
+        renderer::parametric_model::ParametricNodeId nodeId = 0U;
+    };
+
+    struct NodeUsagePanelState {
+        renderer::parametric_model::ParametricNodeId nodeId = 0U;
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricInputSemantic semantic = renderer::parametric_model::ParametricInputSemantic::center;
+    };
+
     struct SceneObjectPanelState {
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
@@ -50,6 +76,9 @@ public:
         SceneObjectControlWidget::MirrorState mirror {};
         SceneObjectControlWidget::LinearArrayState linearArray {};
         std::vector<FeaturePanelState> features;
+        std::vector<UnitPanelState> units;
+        std::vector<UnitInputPanelState> unitInputs;
+        std::vector<NodeUsagePanelState> nodeUsages;
     };
 
     struct LightingPanelState {
@@ -89,6 +118,7 @@ signals:
     void objectFeatureAddRequested(int index, int featureKind);
     void objectFeatureRemoveRequested(int index, int featureId);
     void objectFeatureEnabledChanged(int index, int featureId, bool enabled);
+    void objectNodePositionChanged(int index, int nodeId, float x, float y, float z);
     void objectAddRequested(int primitiveKind);
     void deleteSelectedObjectRequested();
     void objectSelectionChanged(int objectId);
@@ -126,9 +156,13 @@ private:
     void setCameraState(const CameraPanelState& state);
     void refreshObjectExplorer();
     void refreshFeatureExplorer();
+    void refreshNodeExplorer();
+    void refreshNodeInspector();
     void refreshObjectInspector();
     void refreshBoundsList();
+    void refreshParametricDebugPage();
     void updateFeatureActionState();
+    void emitInspectedNodePosition();
     int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
     [[nodiscard]] int currentObjectIndex() const;
     [[nodiscard]] const SceneObjectPanelState* currentObjectState() const;
@@ -139,10 +173,18 @@ private:
     CameraControlWidget* cameraWidget_ = nullptr;
     QListWidget* objectListWidget_ = nullptr;
     QListWidget* featureListWidget_ = nullptr;
+    QListWidget* nodeListWidget_ = nullptr;
     QListWidget* boundsListWidget_ = nullptr;
+    QListWidget* parametricBoundsListWidget_ = nullptr;
+    QListWidget* unitListWidget_ = nullptr;
+    QListWidget* unitInputListWidget_ = nullptr;
+    QListWidget* nodeUsageListWidget_ = nullptr;
     QLabel* objectSelectionLabel_ = nullptr;
     QLabel* featureSelectionLabel_ = nullptr;
     QCheckBox* featureEnabledCheckBox_ = nullptr;
+    QDoubleSpinBox* nodeXSpinBox_ = nullptr;
+    QDoubleSpinBox* nodeYSpinBox_ = nullptr;
+    QDoubleSpinBox* nodeZSpinBox_ = nullptr;
     QPushButton* activateObjectButton_ = nullptr;
     QPushButton* deleteSelectedObjectButton_ = nullptr;
     QPushButton* activateFeatureButton_ = nullptr;
@@ -157,4 +199,5 @@ private:
     PanelState panelState_ {};
     int inspectedObjectIndex_ = -1;
     renderer::parametric_model::ParametricFeatureId inspectedFeatureId_ = 0U;
+    renderer::parametric_model::ParametricNodeId inspectedNodeId_ = 0U;
 };

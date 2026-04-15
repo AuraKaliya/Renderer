@@ -482,6 +482,18 @@ scene_contract::MeshData buildBoxMesh(const BoxSpec& spec) {
     return mesh;
 }
 
+scene_contract::MeshData buildBoxMesh(
+    BoxSpec spec,
+    const std::vector<ParametricNodeDescriptor>& nodes,
+    std::vector<EvaluationDiagnostic>& diagnostics,
+    ParametricFeatureId featureId)
+{
+    const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    auto mesh = buildBoxMesh(normalizeBoxSpec(spec, diagnostics, featureId));
+    translateMesh(mesh, center);
+    return mesh;
+}
+
 scene_contract::MeshData buildCylinderMesh(const CylinderSpec& spec) {
     scene_contract::MeshData mesh;
     const float halfHeight = spec.height * 0.5F;
@@ -532,6 +544,18 @@ scene_contract::MeshData buildCylinderMesh(const CylinderSpec& spec) {
     }
 
     mesh.localBounds = makeAabb(-spec.radius, -halfHeight, -spec.radius, spec.radius, halfHeight, spec.radius);
+    return mesh;
+}
+
+scene_contract::MeshData buildCylinderMesh(
+    CylinderSpec spec,
+    const std::vector<ParametricNodeDescriptor>& nodes,
+    std::vector<EvaluationDiagnostic>& diagnostics,
+    ParametricFeatureId featureId)
+{
+    const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    auto mesh = buildCylinderMesh(normalizeCylinderSpec(spec, diagnostics, featureId));
+    translateMesh(mesh, center);
     return mesh;
 }
 
@@ -616,9 +640,9 @@ scene_contract::MeshData buildPrimitiveMesh(
 {
     switch (descriptor.kind) {
     case PrimitiveKind::box:
-        return buildBoxMesh(normalizeBoxSpec(descriptor.box, diagnostics, featureId));
+        return buildBoxMesh(descriptor.box, nodes, diagnostics, featureId);
     case PrimitiveKind::cylinder:
-        return buildCylinderMesh(normalizeCylinderSpec(descriptor.cylinder, diagnostics, featureId));
+        return buildCylinderMesh(descriptor.cylinder, nodes, diagnostics, featureId);
     case PrimitiveKind::sphere:
         return buildSphereMesh(descriptor.sphere, nodes, diagnostics, featureId);
     }

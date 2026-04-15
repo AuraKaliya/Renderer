@@ -4,7 +4,9 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFrame>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -88,6 +90,96 @@ QString featureKindText(renderer::parametric_model::FeatureKind kind) {
     return QStringLiteral("Unknown");
 }
 
+QString unitKindText(renderer::parametric_model::ParametricUnitKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::ParametricUnitKind::primitive_generator:
+        return QStringLiteral("Primitive Generator");
+    case renderer::parametric_model::ParametricUnitKind::mirror_operator:
+        return QStringLiteral("Mirror Operator");
+    case renderer::parametric_model::ParametricUnitKind::linear_array_operator:
+        return QStringLiteral("Linear Array Operator");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
+QString constructionKindText(renderer::parametric_model::ParametricConstructionKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::ParametricConstructionKind::box_center_size:
+        return QStringLiteral("Box: center + size");
+    case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_height:
+        return QStringLiteral("Cylinder: center + radius + height");
+    case renderer::parametric_model::ParametricConstructionKind::sphere_center_radius:
+        return QStringLiteral("Sphere: center + radius");
+    case renderer::parametric_model::ParametricConstructionKind::sphere_center_surface_point:
+        return QStringLiteral("Sphere: center + surface point");
+    case renderer::parametric_model::ParametricConstructionKind::mirror_axis_plane:
+        return QStringLiteral("Mirror: axis + plane");
+    case renderer::parametric_model::ParametricConstructionKind::linear_array_count_offset:
+        return QStringLiteral("Linear Array: count + offset");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
+QString inputKindText(renderer::parametric_model::ParametricInputKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::ParametricInputKind::node:
+        return QStringLiteral("node");
+    case renderer::parametric_model::ParametricInputKind::float_value:
+        return QStringLiteral("float");
+    case renderer::parametric_model::ParametricInputKind::integer_value:
+        return QStringLiteral("integer");
+    case renderer::parametric_model::ParametricInputKind::vector3:
+        return QStringLiteral("vec3");
+    case renderer::parametric_model::ParametricInputKind::enum_value:
+        return QStringLiteral("enum");
+    }
+
+    return QStringLiteral("unknown");
+}
+
+QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic semantic) {
+    switch (semantic) {
+    case renderer::parametric_model::ParametricInputSemantic::center:
+        return QStringLiteral("center");
+    case renderer::parametric_model::ParametricInputSemantic::surface_point:
+        return QStringLiteral("surface point");
+    case renderer::parametric_model::ParametricInputSemantic::width:
+        return QStringLiteral("width");
+    case renderer::parametric_model::ParametricInputSemantic::height:
+        return QStringLiteral("height");
+    case renderer::parametric_model::ParametricInputSemantic::depth:
+        return QStringLiteral("depth");
+    case renderer::parametric_model::ParametricInputSemantic::radius:
+        return QStringLiteral("radius");
+    case renderer::parametric_model::ParametricInputSemantic::slices:
+        return QStringLiteral("slices");
+    case renderer::parametric_model::ParametricInputSemantic::stacks:
+        return QStringLiteral("stacks");
+    case renderer::parametric_model::ParametricInputSemantic::segments:
+        return QStringLiteral("segments");
+    case renderer::parametric_model::ParametricInputSemantic::axis:
+        return QStringLiteral("axis");
+    case renderer::parametric_model::ParametricInputSemantic::plane_offset:
+        return QStringLiteral("plane offset");
+    case renderer::parametric_model::ParametricInputSemantic::count:
+        return QStringLiteral("count");
+    case renderer::parametric_model::ParametricInputSemantic::offset:
+        return QStringLiteral("offset");
+    }
+
+    return QStringLiteral("unknown");
+}
+
+QDoubleSpinBox* makeNodeCoordinateSpinBox(QWidget* parent) {
+    auto* spinBox = new QDoubleSpinBox(parent);
+    spinBox->setRange(-1000.0, 1000.0);
+    spinBox->setSingleStep(0.05);
+    spinBox->setDecimals(3);
+    return spinBox;
+}
+
 QString inspectorTitleForObject(const ViewerControlPanel::SceneObjectPanelState& objectState) {
     return QStringLiteral("%1 Object [id:%2]")
         .arg(primitiveKindText(objectState.primitiveKind))
@@ -110,10 +202,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
     const auto sceneTab = makeScrollableTabPage(tabWidget);
     const auto cameraTab = makeScrollableTabPage(tabWidget);
+    const auto parametricTab = makeScrollableTabPage(tabWidget);
     const auto debugTab = makeScrollableTabPage(tabWidget);
 
     tabWidget->addTab(sceneTab.page, "Scene");
     tabWidget->addTab(cameraTab.page, "Camera");
+    tabWidget->addTab(parametricTab.page, "Parametric");
     tabWidget->addTab(debugTab.page, "Debug");
 
     auto* explorerGroup = new QGroupBox("Object Explorer", sceneTab.content);
@@ -145,7 +239,10 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         if (row < 0 || row >= static_cast<int>(panelState_.objects.size())) {
             inspectedObjectIndex_ = -1;
             inspectedFeatureId_ = 0U;
+            inspectedNodeId_ = 0U;
             refreshFeatureExplorer();
+            refreshNodeExplorer();
+            refreshNodeInspector();
             refreshObjectInspector();
             updateFeatureActionState();
             return;
@@ -153,7 +250,10 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
 
         inspectedObjectIndex_ = row;
         inspectedFeatureId_ = 0U;
+        inspectedNodeId_ = 0U;
         refreshFeatureExplorer();
+        refreshNodeExplorer();
+        refreshNodeInspector();
         refreshObjectInspector();
         updateFeatureActionState();
         emit objectSelectionChanged(static_cast<int>(panelState_.objects[inspectedObjectIndex_].id));
@@ -296,6 +396,50 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
             static_cast<int>(inspectedFeatureId_));
     });
     explorerLayout->addWidget(removeFeatureButton_);
+
+    explorerLayout->addWidget(new QLabel("Nodes", explorerGroup));
+
+    nodeListWidget_ = new QListWidget(explorerGroup);
+    nodeListWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(nodeListWidget_, &QListWidget::currentRowChanged, this, [this](int row) {
+        const auto* objectState = currentObjectState();
+        if (row < 0 || objectState == nullptr) {
+            inspectedNodeId_ = 0U;
+            refreshNodeInspector();
+            return;
+        }
+
+        const auto* item = nodeListWidget_->item(row);
+        if (item == nullptr) {
+            inspectedNodeId_ = 0U;
+            refreshNodeInspector();
+            return;
+        }
+
+        inspectedNodeId_ = static_cast<renderer::parametric_model::ParametricNodeId>(
+            item->data(Qt::UserRole).toUInt());
+        refreshNodeInspector();
+    });
+    explorerLayout->addWidget(nodeListWidget_);
+
+    auto* nodePositionGroup = new QGroupBox("Selected Node Position", explorerGroup);
+    auto* nodePositionLayout = new QFormLayout(nodePositionGroup);
+    nodeXSpinBox_ = makeNodeCoordinateSpinBox(nodePositionGroup);
+    nodeYSpinBox_ = makeNodeCoordinateSpinBox(nodePositionGroup);
+    nodeZSpinBox_ = makeNodeCoordinateSpinBox(nodePositionGroup);
+    connect(nodeXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        emitInspectedNodePosition();
+    });
+    connect(nodeYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        emitInspectedNodePosition();
+    });
+    connect(nodeZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        emitInspectedNodePosition();
+    });
+    nodePositionLayout->addRow("X", nodeXSpinBox_);
+    nodePositionLayout->addRow("Y", nodeYSpinBox_);
+    nodePositionLayout->addRow("Z", nodeZSpinBox_);
+    explorerLayout->addWidget(nodePositionGroup);
 
     sceneTab.contentLayout->addWidget(explorerGroup);
 
@@ -482,6 +626,30 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     boundsListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     boundsLayout->addWidget(boundsListWidget_);
 
+    auto* parametricBoundsGroup = new QGroupBox("Model Bounds", parametricTab.content);
+    auto* parametricBoundsLayout = new QVBoxLayout(parametricBoundsGroup);
+    parametricBoundsListWidget_ = new QListWidget(parametricBoundsGroup);
+    parametricBoundsListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    parametricBoundsLayout->addWidget(parametricBoundsListWidget_);
+
+    auto* unitGroup = new QGroupBox("Units", parametricTab.content);
+    auto* unitLayout = new QVBoxLayout(unitGroup);
+    unitListWidget_ = new QListWidget(unitGroup);
+    unitListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    unitLayout->addWidget(unitListWidget_);
+
+    auto* unitInputGroup = new QGroupBox("Unit Inputs", parametricTab.content);
+    auto* unitInputLayout = new QVBoxLayout(unitInputGroup);
+    unitInputListWidget_ = new QListWidget(unitInputGroup);
+    unitInputListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    unitInputLayout->addWidget(unitInputListWidget_);
+
+    auto* nodeUsageGroup = new QGroupBox("Node Usage", parametricTab.content);
+    auto* nodeUsageLayout = new QVBoxLayout(nodeUsageGroup);
+    nodeUsageListWidget_ = new QListWidget(nodeUsageGroup);
+    nodeUsageListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    nodeUsageLayout->addWidget(nodeUsageListWidget_);
+
     auto* debugActionGroup = new QGroupBox("Debug Actions", debugTab.content);
     auto* debugActionLayout = new QVBoxLayout(debugActionGroup);
 
@@ -498,14 +666,23 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     cameraTab.contentLayout->addWidget(cameraActionGroup);
     cameraTab.contentLayout->addStretch(1);
 
+    parametricTab.contentLayout->addWidget(parametricBoundsGroup);
+    parametricTab.contentLayout->addWidget(unitGroup);
+    parametricTab.contentLayout->addWidget(unitInputGroup);
+    parametricTab.contentLayout->addWidget(nodeUsageGroup);
+    parametricTab.contentLayout->addStretch(1);
+
     debugTab.contentLayout->addWidget(boundsGroup);
     debugTab.contentLayout->addWidget(debugActionGroup);
     debugTab.contentLayout->addStretch(1);
 
     refreshObjectExplorer();
     refreshFeatureExplorer();
+    refreshNodeExplorer();
+    refreshNodeInspector();
     refreshObjectInspector();
     refreshBoundsList();
+    refreshParametricDebugPage();
     updateFeatureActionState();
 }
 
@@ -533,8 +710,11 @@ void ViewerControlPanel::setPanelState(const PanelState& state) {
 
     refreshObjectExplorer();
     refreshFeatureExplorer();
+    refreshNodeExplorer();
+    refreshNodeInspector();
     refreshObjectInspector();
     refreshBoundsList();
+    refreshParametricDebugPage();
     updateFeatureActionState();
 }
 
@@ -640,6 +820,79 @@ void ViewerControlPanel::refreshFeatureExplorer() {
     updateFeatureActionState();
 }
 
+void ViewerControlPanel::refreshNodeExplorer() {
+    if (nodeListWidget_ == nullptr) {
+        return;
+    }
+
+    const auto* objectState = currentObjectState();
+    const QSignalBlocker blocker(nodeListWidget_);
+    nodeListWidget_->clear();
+
+    if (objectState == nullptr || objectState->nodes.empty()) {
+        inspectedNodeId_ = 0U;
+        nodeListWidget_->setCurrentRow(-1);
+        return;
+    }
+
+    bool hasInspectedNode = false;
+    for (const auto& node : objectState->nodes) {
+        if (node.id == inspectedNodeId_) {
+            hasInspectedNode = true;
+            break;
+        }
+    }
+    if (!hasInspectedNode) {
+        inspectedNodeId_ = objectState->nodes.front().id;
+    }
+
+    int selectedRow = -1;
+    for (int row = 0; row < static_cast<int>(objectState->nodes.size()); ++row) {
+        const auto& node = objectState->nodes[static_cast<std::size_t>(row)];
+        auto* item = new QListWidgetItem(
+            QStringLiteral("Point [id:%1]  (%2, %3, %4)")
+                .arg(node.id)
+                .arg(node.point.position.x, 0, 'f', 2)
+                .arg(node.point.position.y, 0, 'f', 2)
+                .arg(node.point.position.z, 0, 'f', 2),
+            nodeListWidget_);
+        item->setData(Qt::UserRole, static_cast<uint>(node.id));
+        if (node.id == inspectedNodeId_) {
+            selectedRow = row;
+        }
+    }
+
+    nodeListWidget_->setCurrentRow(selectedRow);
+}
+
+void ViewerControlPanel::refreshNodeInspector() {
+    if (nodeXSpinBox_ == nullptr || nodeYSpinBox_ == nullptr || nodeZSpinBox_ == nullptr) {
+        return;
+    }
+
+    const auto* objectState = currentObjectState();
+    const renderer::parametric_model::ParametricNodeDescriptor* selectedNode = nullptr;
+    if (objectState != nullptr) {
+        for (const auto& node : objectState->nodes) {
+            if (node.id == inspectedNodeId_) {
+                selectedNode = &node;
+                break;
+            }
+        }
+    }
+
+    const QSignalBlocker xBlocker(nodeXSpinBox_);
+    const QSignalBlocker yBlocker(nodeYSpinBox_);
+    const QSignalBlocker zBlocker(nodeZSpinBox_);
+    const bool hasNode = selectedNode != nullptr;
+    nodeXSpinBox_->setEnabled(hasNode);
+    nodeYSpinBox_->setEnabled(hasNode);
+    nodeZSpinBox_->setEnabled(hasNode);
+    nodeXSpinBox_->setValue(hasNode ? selectedNode->point.position.x : 0.0);
+    nodeYSpinBox_->setValue(hasNode ? selectedNode->point.position.y : 0.0);
+    nodeZSpinBox_->setValue(hasNode ? selectedNode->point.position.z : 0.0);
+}
+
 void ViewerControlPanel::refreshObjectInspector() {
     for (auto* objectWidget : objectWidgets_) {
         if (objectWidget != nullptr) {
@@ -688,6 +941,63 @@ void ViewerControlPanel::refreshBoundsList() {
                 .arg(primitiveKindText(object.primitiveKind))
                 .arg(object.id),
             object.bounds));
+    }
+}
+
+void ViewerControlPanel::refreshParametricDebugPage() {
+    if (parametricBoundsListWidget_ == nullptr
+        || unitListWidget_ == nullptr
+        || unitInputListWidget_ == nullptr
+        || nodeUsageListWidget_ == nullptr) {
+        return;
+    }
+
+    const auto* objectState = currentObjectState();
+
+    const QSignalBlocker boundsBlocker(parametricBoundsListWidget_);
+    parametricBoundsListWidget_->clear();
+    if (objectState != nullptr) {
+        parametricBoundsListWidget_->addItem(formatBoundsText("Active model bounds", objectState->bounds));
+    }
+
+    const QSignalBlocker unitBlocker(unitListWidget_);
+    unitListWidget_->clear();
+    if (objectState != nullptr) {
+        for (const auto& unit : objectState->units) {
+            unitListWidget_->addItem(
+                QStringLiteral("unit:%1  feature:%2\n%3\n%4")
+                    .arg(unit.id)
+                    .arg(unit.featureId)
+                    .arg(unitKindText(unit.kind))
+                    .arg(constructionKindText(unit.constructionKind)));
+        }
+    }
+
+    const QSignalBlocker inputBlocker(unitInputListWidget_);
+    unitInputListWidget_->clear();
+    if (objectState != nullptr) {
+        for (const auto& input : objectState->unitInputs) {
+            unitInputListWidget_->addItem(
+                QStringLiteral("unit:%1  feature:%2  %3 : %4%5")
+                    .arg(input.unitId)
+                    .arg(input.featureId)
+                    .arg(inputSemanticText(input.semantic))
+                    .arg(inputKindText(input.kind))
+                    .arg(input.nodeId != 0U ? QStringLiteral("  node:%1").arg(input.nodeId) : QString()));
+        }
+    }
+
+    const QSignalBlocker usageBlocker(nodeUsageListWidget_);
+    nodeUsageListWidget_->clear();
+    if (objectState != nullptr) {
+        for (const auto& usage : objectState->nodeUsages) {
+            nodeUsageListWidget_->addItem(
+                QStringLiteral("node:%1 -> unit:%2  feature:%3  as %4")
+                    .arg(usage.nodeId)
+                    .arg(usage.unitId)
+                    .arg(usage.featureId)
+                    .arg(inputSemanticText(usage.semantic)));
+        }
     }
 }
 
@@ -782,6 +1092,24 @@ void ViewerControlPanel::updateFeatureActionState() {
         panelState_.selection.selectedFeatureId != 0U
         && panelState_.selection.selectedFeatureId != panelState_.selection.activeFeatureId);
     removeFeatureButton_->setEnabled(removable);
+}
+
+void ViewerControlPanel::emitInspectedNodePosition() {
+    const int objectIndex = currentObjectIndex();
+    if (objectIndex < 0
+        || inspectedNodeId_ == 0U
+        || nodeXSpinBox_ == nullptr
+        || nodeYSpinBox_ == nullptr
+        || nodeZSpinBox_ == nullptr) {
+        return;
+    }
+
+    emit objectNodePositionChanged(
+        objectIndex,
+        static_cast<int>(inspectedNodeId_),
+        static_cast<float>(nodeXSpinBox_->value()),
+        static_cast<float>(nodeYSpinBox_->value()),
+        static_cast<float>(nodeZSpinBox_->value()));
 }
 
 int ViewerControlPanel::findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const {

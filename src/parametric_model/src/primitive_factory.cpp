@@ -130,6 +130,38 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricObject(
     return descriptor;
 }
 
+ParametricObjectDescriptor PrimitiveFactory::makeParametricBoxFromCenterSize(
+    const scene_contract::Vec3f& center,
+    float width,
+    float height,
+    float depth)
+{
+    auto descriptor = makeParametricObject(makeBoxDescriptor(width, height, depth));
+    auto centerNode = makePointNode(center);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.box.center = {centerNode.id};
+    }
+    descriptor.nodes.push_back(centerNode);
+    return descriptor;
+}
+
+ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromCenterRadiusHeight(
+    const scene_contract::Vec3f& center,
+    float radius,
+    float height,
+    std::uint32_t segments)
+{
+    auto descriptor = makeParametricObject(makeCylinderDescriptor(radius, height, segments));
+    auto centerNode = makePointNode(center);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.cylinder.center = {centerNode.id};
+    }
+    descriptor.nodes.push_back(centerNode);
+    return descriptor;
+}
+
 ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromCenterRadius(
     const scene_contract::Vec3f& center,
     float radius,

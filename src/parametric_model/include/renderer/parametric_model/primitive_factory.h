@@ -35,6 +35,18 @@ public:
     [[nodiscard]] static ParametricObjectDescriptor makeParametricObject(
         const PrimitiveDescriptor& basePrimitive);
 
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricBoxFromCenterSize(
+        const scene_contract::Vec3f& center,
+        float width,
+        float height,
+        float depth);
+
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricCylinderFromCenterRadiusHeight(
+        const scene_contract::Vec3f& center,
+        float radius,
+        float height,
+        std::uint32_t segments = 24U);
+
     [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromCenterRadius(
         const scene_contract::Vec3f& center,
         float radius,

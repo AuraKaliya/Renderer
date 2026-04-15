@@ -92,13 +92,30 @@ SceneObjectDefaults makeDynamicSceneObjectDefaults(
 renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObject(
     const renderer::parametric_model::PrimitiveDescriptor& basePrimitive)
 {
-    auto descriptor = basePrimitive.kind == renderer::parametric_model::PrimitiveKind::sphere
-        ? renderer::parametric_model::PrimitiveFactory::makeParametricSphereFromCenterRadius(
+    renderer::parametric_model::ParametricObjectDescriptor descriptor;
+    switch (basePrimitive.kind) {
+    case renderer::parametric_model::PrimitiveKind::box:
+        descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricBoxFromCenterSize(
+            {0.0F, 0.0F, 0.0F},
+            basePrimitive.box.width,
+            basePrimitive.box.height,
+            basePrimitive.box.depth);
+        break;
+    case renderer::parametric_model::PrimitiveKind::cylinder:
+        descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricCylinderFromCenterRadiusHeight(
+            {0.0F, 0.0F, 0.0F},
+            basePrimitive.cylinder.radius,
+            basePrimitive.cylinder.height,
+            basePrimitive.cylinder.segments);
+        break;
+    case renderer::parametric_model::PrimitiveKind::sphere:
+        descriptor = renderer::parametric_model::PrimitiveFactory::makeParametricSphereFromCenterRadius(
             {0.0F, 0.0F, 0.0F},
             basePrimitive.sphere.radius,
             basePrimitive.sphere.slices,
-            basePrimitive.sphere.stacks)
-        : renderer::parametric_model::PrimitiveFactory::makeParametricObject(basePrimitive);
+            basePrimitive.sphere.stacks);
+        break;
+    }
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeMirrorFeature());
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeLinearArrayFeature());
     return descriptor;
@@ -633,6 +650,13 @@ void ViewerWindow::bindControlPanelSignals() {
             index,
             static_cast<renderer::parametric_model::ParametricFeatureId>(featureId),
             enabled);
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::objectNodePositionChanged, this, [this](int index, int nodeId, float x, float y, float z) {
+        viewport_->setObjectNodePosition(
+            index,
+            static_cast<renderer::parametric_model::ParametricNodeId>(nodeId),
+            {x, y, z});
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::objectAddRequested, this, [this](int primitiveKind) {
@@ -1446,6 +1470,25 @@ void ViewerWindow::Viewport::setObjectFeatureEnabled(
     applyParametricObjectDescriptor(index, descriptor);
 }
 
+void ViewerWindow::Viewport::setObjectNodePosition(
+    int index,
+    renderer::parametric_model::ParametricNodeId nodeId,
+    const renderer::scene_contract::Vec3f& position)
+{
+    if (index < 0 || index >= static_cast<int>(sceneObjects_.size()) || nodeId == 0U) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[index].parametricObjectDescriptor;
+    auto* node = findPointNodeById(descriptor, nodeId);
+    if (node == nullptr) {
+        return;
+    }
+
+    node->point.position = position;
+    applyParametricObjectDescriptor(index, descriptor);
+}
+
 void ViewerWindow::Viewport::addObject(renderer::parametric_model::PrimitiveKind kind) {
     SceneObject sceneObject;
     const std::size_t newObjectIndex = sceneObjects_.size();
@@ -1634,6 +1677,43 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
                 unit.id,
                 feature->kind,
                 feature->enabled
+            });
+        }
+        objectState.units.clear();
+        objectState.units.reserve(units.size());
+        for (const auto& unit : units) {
+            objectState.units.push_back({
+                unit.id,
+                unit.featureId,
+                unit.kind,
+                unit.role,
+                unit.constructionKind,
+                unit.enabled
+            });
+        }
+
+        const auto unitInputs = renderer::parametric_model::ParametricModelStructure::describeUnitInputs(descriptor);
+        objectState.unitInputs.clear();
+        objectState.unitInputs.reserve(unitInputs.size());
+        for (const auto& input : unitInputs) {
+            objectState.unitInputs.push_back({
+                input.unitId,
+                input.featureId,
+                input.kind,
+                input.semantic,
+                input.nodeId
+            });
+        }
+
+        const auto nodeUsages = renderer::parametric_model::ParametricModelStructure::describeNodeUsages(descriptor);
+        objectState.nodeUsages.clear();
+        objectState.nodeUsages.reserve(nodeUsages.size());
+        for (const auto& usage : nodeUsages) {
+            objectState.nodeUsages.push_back({
+                usage.nodeId,
+                usage.unitId,
+                usage.featureId,
+                usage.semantic
             });
         }
     }

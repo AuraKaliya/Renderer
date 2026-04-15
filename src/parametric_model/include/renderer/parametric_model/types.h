@@ -40,12 +40,14 @@ struct BoxSpec {
     float width = 1.0F;
     float height = 1.0F;
     float depth = 1.0F;
+    NodeReference center {};
 };
 
 struct CylinderSpec {
     float radius = 0.5F;
     float height = 1.0F;
     std::uint32_t segments = 24U;
+    NodeReference center {};
 };
 
 struct SphereSpec {
@@ -101,6 +103,39 @@ enum class ParametricUnitRole : std::uint8_t {
     operator_unit
 };
 
+enum class ParametricConstructionKind : std::uint8_t {
+    box_center_size,
+    cylinder_center_radius_height,
+    sphere_center_radius,
+    sphere_center_surface_point,
+    mirror_axis_plane,
+    linear_array_count_offset
+};
+
+enum class ParametricInputKind : std::uint8_t {
+    node,
+    float_value,
+    integer_value,
+    vector3,
+    enum_value
+};
+
+enum class ParametricInputSemantic : std::uint8_t {
+    center,
+    surface_point,
+    width,
+    height,
+    depth,
+    radius,
+    slices,
+    stacks,
+    segments,
+    axis,
+    plane_offset,
+    count,
+    offset
+};
+
 struct ParametricObjectMetadata {
     ParametricObjectId id = 0U;
     PrimitiveKind objectKind = PrimitiveKind::box;
@@ -128,7 +163,23 @@ struct ParametricUnitDescriptor {
     ParametricFeatureId featureId = 0U;
     ParametricUnitKind kind = ParametricUnitKind::primitive_generator;
     ParametricUnitRole role = ParametricUnitRole::generator;
+    ParametricConstructionKind constructionKind = ParametricConstructionKind::box_center_size;
     bool enabled = true;
+};
+
+struct ParametricUnitInputDescriptor {
+    ParametricUnitId unitId = 0U;
+    ParametricFeatureId featureId = 0U;
+    ParametricInputKind kind = ParametricInputKind::float_value;
+    ParametricInputSemantic semantic = ParametricInputSemantic::radius;
+    ParametricNodeId nodeId = 0U;
+};
+
+struct ParametricNodeUsageDescriptor {
+    ParametricNodeId nodeId = 0U;
+    ParametricUnitId unitId = 0U;
+    ParametricFeatureId featureId = 0U;
+    ParametricInputSemantic semantic = ParametricInputSemantic::center;
 };
 
 }  // namespace renderer::parametric_model
