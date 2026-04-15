@@ -1,5 +1,39 @@
 # Errors
 
+## [ERR-20260415-001] cpp-pointer-member-access
+
+**Logged**: 2026-04-15T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+Viewer panel state migration briefly used object member access on a `FeatureDescriptor*`.
+
+### Error
+```text
+viewer_window.cpp(1633,25): error C2228: ".id" left side must have class/struct/union
+type is "const renderer::parametric_model::FeatureDescriptor *"
+```
+
+### Context
+- Command: `cmake --build build --config Debug --target test_viewer`
+- During migration from direct feature iteration to unit descriptors, `findObjectFeatureById(...)` returned a pointer but the state push used `feature.id`.
+
+### Suggested Fix
+When joining derived unit descriptors back to feature descriptors, use `feature->...` after the null check.
+
+### Metadata
+- Reproducible: yes
+- Related Files: src/test_viewer/src/viewer_window.cpp
+
+### Resolution
+- **Resolved**: 2026-04-15T00:00:00+08:00
+- **Commit/PR**: pending
+- **Notes**: Replaced pointer member access with `feature->id`, `feature->kind`, and `feature->enabled`.
+
+---
+
 ## [ERR-20260403-001] web-open-blender-docs
 
 **Logged**: 2026-04-03T00:00:00+08:00

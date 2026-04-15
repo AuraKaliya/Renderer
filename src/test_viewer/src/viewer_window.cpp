@@ -18,6 +18,8 @@
 
 #include "camera_focus_bounds_utils.h"
 #include "renderer/scene_contract/math_utils.h"
+#include "renderer/parametric_model/model_structure.h"
+#include "renderer/parametric_model/parametric_evaluator.h"
 #include "renderer/parametric_model/primitive_factory.h"
 
 namespace {
@@ -100,6 +102,70 @@ renderer::parametric_model::ParametricObjectDescriptor makeDefaultParametricObje
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeMirrorFeature());
     descriptor.features.push_back(renderer::parametric_model::PrimitiveFactory::makeLinearArrayFeature());
     return descriptor;
+}
+
+const char* diagnosticSeverityLabel(
+    renderer::parametric_model::EvaluationDiagnosticSeverity severity)
+{
+    switch (severity) {
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::info:
+        return "info";
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::warning:
+        return "warning";
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::error:
+        return "error";
+    }
+
+    return "unknown";
+}
+
+const char* diagnosticCodeLabel(
+    renderer::parametric_model::EvaluationDiagnosticCode code)
+{
+    switch (code) {
+    case renderer::parametric_model::EvaluationDiagnosticCode::value_clamped:
+        return "value_clamped";
+    case renderer::parametric_model::EvaluationDiagnosticCode::missing_node:
+        return "missing_node";
+    case renderer::parametric_model::EvaluationDiagnosticCode::invalid_feature_order:
+        return "invalid_feature_order";
+    case renderer::parametric_model::EvaluationDiagnosticCode::empty_model:
+        return "empty_model";
+    }
+
+    return "unknown";
+}
+
+void logParametricDiagnostic(
+    const renderer::parametric_model::EvaluationDiagnostic& diagnostic)
+{
+    const auto message = QString::fromStdString(diagnostic.message);
+    if (diagnostic.severity == renderer::parametric_model::EvaluationDiagnosticSeverity::info) {
+        qDebug() << "Parametric evaluation"
+                 << diagnosticSeverityLabel(diagnostic.severity)
+                 << diagnosticCodeLabel(diagnostic.code)
+                 << "feature" << diagnostic.featureId
+                 << "node" << diagnostic.nodeId
+                 << message;
+        return;
+    }
+
+    qWarning() << "Parametric evaluation"
+               << diagnosticSeverityLabel(diagnostic.severity)
+               << diagnosticCodeLabel(diagnostic.code)
+               << "feature" << diagnostic.featureId
+               << "node" << diagnostic.nodeId
+               << message;
+}
+
+renderer::scene_contract::MeshData buildParametricMeshWithDiagnostics(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    auto result = renderer::parametric_model::ParametricEvaluator::evaluate(descriptor);
+    for (const auto& diagnostic : result.diagnostics) {
+        logParametricDiagnostic(diagnostic);
+    }
+    return std::move(result.mesh);
 }
 
 const std::array<renderer::parametric_model::ParametricObjectDescriptor, kDefaultSceneObjectCount> kDefaultParametricObjects = {{
@@ -697,7 +763,7 @@ ViewerWindow::Viewport::Viewport(std::function<void()> cameraStateChangedCallbac
         const auto& defaults = kDefaultSceneObjects[index];
 
         sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
-        sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+        sceneObject.meshData = buildParametricMeshWithDiagnostics(sceneObject.parametricObjectDescriptor);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
         sceneObject.offsetY = defaults.offsetY;
@@ -758,7 +824,7 @@ void ViewerWindow::Viewport::resetDefaults() {
         auto& sceneObject = sceneObjects_[index];
         sceneObject = {};
         sceneObject.parametricObjectDescriptor = kDefaultParametricObjects[index];
-        sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+        sceneObject.meshData = buildParametricMeshWithDiagnostics(sceneObject.parametricObjectDescriptor);
         sceneObject.materialData.baseColor = defaults.color;
         sceneObject.offsetX = defaults.offsetX;
         sceneObject.offsetY = defaults.offsetY;
@@ -1386,7 +1452,7 @@ void ViewerWindow::Viewport::addObject(renderer::parametric_model::PrimitiveKind
     const auto defaults = makeDynamicSceneObjectDefaults(kind, newObjectIndex);
 
     sceneObject.parametricObjectDescriptor = makeDefaultParametricObject(makeDefaultPrimitiveDescriptor(kind));
-    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+    sceneObject.meshData = buildParametricMeshWithDiagnostics(sceneObject.parametricObjectDescriptor);
     sceneObject.materialData.baseColor = defaults.color;
     sceneObject.offsetX = defaults.offsetX;
     sceneObject.offsetY = defaults.offsetY;
@@ -1555,13 +1621,19 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
             objectState.linearArray.offset = linearArrayFeature->linearArray.offset;
         }
 
+        const auto units = renderer::parametric_model::ParametricModelStructure::describeUnits(descriptor);
         objectState.features.clear();
-        objectState.features.reserve(descriptor.features.size());
-        for (const auto& feature : descriptor.features) {
+        objectState.features.reserve(units.size());
+        for (const auto& unit : units) {
+            const auto* feature = findObjectFeatureById(descriptor, unit.featureId);
+            if (feature == nullptr) {
+                continue;
+            }
             objectState.features.push_back({
-                feature.id,
-                feature.kind,
-                feature.enabled
+                feature->id,
+                unit.id,
+                feature->kind,
+                feature->enabled
             });
         }
     }
@@ -2326,7 +2398,7 @@ void ViewerWindow::Viewport::rebuildObjectMesh(int index) {
     }
 
     auto& sceneObject = sceneObjects_[index];
-    sceneObject.meshData = renderer::parametric_model::PrimitiveFactory::build(sceneObject.parametricObjectDescriptor);
+    sceneObject.meshData = buildParametricMeshWithDiagnostics(sceneObject.parametricObjectDescriptor);
 
     if (renderer_.isInitialized()) {
         bool meshReady = false;

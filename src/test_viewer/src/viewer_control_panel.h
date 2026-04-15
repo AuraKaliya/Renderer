@@ -33,6 +33,7 @@ public:
 
     struct FeaturePanelState {
         renderer::parametric_model::ParametricFeatureId id = 0U;
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
         renderer::parametric_model::FeatureKind kind = renderer::parametric_model::FeatureKind::primitive;
         bool enabled = true;
     };

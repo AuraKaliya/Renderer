@@ -622,9 +622,10 @@ void ViewerControlPanel::refreshFeatureExplorer() {
         const bool isSelected = feature.id == panelState_.selection.selectedFeatureId;
         const bool isActive = feature.id == panelState_.selection.activeFeatureId;
         auto* item = new QListWidgetItem(
-            QStringLiteral("%1  [id:%2]  [%3]%4%5")
+            QStringLiteral("%1  [feature:%2]  [unit:%3]  [%4]%5%6")
                 .arg(featureKindText(feature.kind))
                 .arg(feature.id)
+                .arg(feature.unitId)
                 .arg(feature.enabled ? QStringLiteral("Enabled") : QStringLiteral("Disabled"))
                 .arg(isSelected ? QStringLiteral("  [Selected]") : QString())
                 .arg(isActive ? QStringLiteral("  [Active]") : QString()),
