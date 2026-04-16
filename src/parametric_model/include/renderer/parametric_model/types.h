@@ -208,4 +208,14 @@ struct ParametricConstructionLinkDescriptor {
     ParametricInputSemantic endSemantic = ParametricInputSemantic::surface_point;
 };
 
+struct ParametricDerivedParameterDescriptor {
+    ParametricUnitId unitId = 0U;
+    ParametricFeatureId featureId = 0U;
+    ParametricConstructionKind constructionKind = ParametricConstructionKind::box_center_size;
+    ParametricInputSemantic semantic = ParametricInputSemantic::radius;
+    float value = 0.0F;
+    ParametricNodeId referenceNodeId = 0U;
+    ParametricNodeId sourceNodeId = 0U;
+};
+
 }  // namespace renderer::parametric_model

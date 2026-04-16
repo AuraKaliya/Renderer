@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <string>
 #include <vector>
 
 #include <QWidget>
@@ -75,6 +77,36 @@ public:
         renderer::parametric_model::ParametricInputSemantic endSemantic = renderer::parametric_model::ParametricInputSemantic::surface_point;
     };
 
+    struct DerivedParameterPanelState {
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricConstructionKind constructionKind =
+            renderer::parametric_model::ParametricConstructionKind::box_center_size;
+        renderer::parametric_model::ParametricInputSemantic semantic = renderer::parametric_model::ParametricInputSemantic::radius;
+        float value = 0.0F;
+        renderer::parametric_model::ParametricNodeId referenceNodeId = 0U;
+        renderer::parametric_model::ParametricNodeId sourceNodeId = 0U;
+    };
+
+    struct EvaluationDiagnosticPanelState {
+        renderer::parametric_model::EvaluationDiagnosticSeverity severity =
+            renderer::parametric_model::EvaluationDiagnosticSeverity::info;
+        renderer::parametric_model::EvaluationDiagnosticCode code =
+            renderer::parametric_model::EvaluationDiagnosticCode::empty_model;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricNodeId nodeId = 0U;
+        std::string message;
+    };
+
+    struct EvaluationSummaryPanelState {
+        bool succeeded = false;
+        std::size_t vertexCount = 0U;
+        std::size_t indexCount = 0U;
+        std::size_t diagnosticCount = 0U;
+        std::size_t warningCount = 0U;
+        std::size_t errorCount = 0U;
+    };
+
     struct SceneObjectPanelState {
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
@@ -91,6 +123,9 @@ public:
         std::vector<UnitInputPanelState> unitInputs;
         std::vector<NodeUsagePanelState> nodeUsages;
         std::vector<ConstructionLinkPanelState> constructionLinks;
+        std::vector<DerivedParameterPanelState> derivedParameters;
+        std::vector<EvaluationDiagnosticPanelState> evaluationDiagnostics;
+        EvaluationSummaryPanelState evaluationSummary {};
     };
 
     struct LightingPanelState {
@@ -196,11 +231,14 @@ private:
     QListWidget* featureListWidget_ = nullptr;
     QListWidget* nodeListWidget_ = nullptr;
     QListWidget* boundsListWidget_ = nullptr;
+    QLabel* evaluationSummaryLabel_ = nullptr;
     QListWidget* parametricBoundsListWidget_ = nullptr;
     QListWidget* unitListWidget_ = nullptr;
     QListWidget* unitInputListWidget_ = nullptr;
     QListWidget* nodeUsageListWidget_ = nullptr;
     QListWidget* constructionLinkListWidget_ = nullptr;
+    QListWidget* derivedParameterListWidget_ = nullptr;
+    QListWidget* evaluationDiagnosticListWidget_ = nullptr;
     QLabel* objectSelectionLabel_ = nullptr;
     QLabel* featureSelectionLabel_ = nullptr;
     QCheckBox* featureEnabledCheckBox_ = nullptr;

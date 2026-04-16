@@ -2087,6 +2087,46 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
                 link.endSemantic
             });
         }
+
+        const auto derivedParameters =
+            renderer::parametric_model::ParametricModelStructure::describeDerivedParameters(descriptor);
+        objectState.derivedParameters.clear();
+        objectState.derivedParameters.reserve(derivedParameters.size());
+        for (const auto& parameter : derivedParameters) {
+            objectState.derivedParameters.push_back({
+                parameter.unitId,
+                parameter.featureId,
+                parameter.constructionKind,
+                parameter.semantic,
+                parameter.value,
+                parameter.referenceNodeId,
+                parameter.sourceNodeId
+            });
+        }
+
+        const auto evaluationResult = renderer::parametric_model::ParametricEvaluator::evaluate(descriptor);
+        objectState.evaluationSummary.succeeded = evaluationResult.succeeded;
+        objectState.evaluationSummary.vertexCount = evaluationResult.mesh.vertices.size();
+        objectState.evaluationSummary.indexCount = evaluationResult.mesh.indices.size();
+        objectState.evaluationSummary.diagnosticCount = evaluationResult.diagnostics.size();
+        objectState.evaluationSummary.warningCount = 0U;
+        objectState.evaluationSummary.errorCount = 0U;
+        objectState.evaluationDiagnostics.clear();
+        objectState.evaluationDiagnostics.reserve(evaluationResult.diagnostics.size());
+        for (const auto& diagnostic : evaluationResult.diagnostics) {
+            if (diagnostic.severity == renderer::parametric_model::EvaluationDiagnosticSeverity::warning) {
+                ++objectState.evaluationSummary.warningCount;
+            } else if (diagnostic.severity == renderer::parametric_model::EvaluationDiagnosticSeverity::error) {
+                ++objectState.evaluationSummary.errorCount;
+            }
+            objectState.evaluationDiagnostics.push_back({
+                diagnostic.severity,
+                diagnostic.code,
+                diagnostic.featureId,
+                diagnostic.nodeId,
+                diagnostic.message
+            });
+        }
     }
 
     state.lighting.ambientStrength = ambientStrength();

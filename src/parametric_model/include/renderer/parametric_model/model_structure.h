@@ -20,6 +20,8 @@ public:
         const ParametricObjectDescriptor& descriptor);
     [[nodiscard]] static std::vector<ParametricConstructionLinkDescriptor> describeConstructionLinks(
         const ParametricObjectDescriptor& descriptor);
+    [[nodiscard]] static std::vector<ParametricDerivedParameterDescriptor> describeDerivedParameters(
+        const ParametricObjectDescriptor& descriptor);
 };
 
 }  // namespace renderer::parametric_model

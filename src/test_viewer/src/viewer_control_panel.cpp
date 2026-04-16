@@ -41,6 +41,19 @@ QString formatBoundsText(const QString& name, const renderer::scene_contract::Aa
         .arg(bounds.max.z, 0, 'f', 2);
 }
 
+QString formatEvaluationSummaryText(
+    const ViewerControlPanel::EvaluationSummaryPanelState& summary)
+{
+    return QStringLiteral(
+               "Status: %1\nVertices: %2\nIndices: %3\nDiagnostics: %4  warnings:%5  errors:%6")
+        .arg(summary.succeeded ? QStringLiteral("succeeded") : QStringLiteral("failed"))
+        .arg(summary.vertexCount)
+        .arg(summary.indexCount)
+        .arg(summary.diagnosticCount)
+        .arg(summary.warningCount)
+        .arg(summary.errorCount);
+}
+
 ScrollableTabPage makeScrollableTabPage(QWidget* parent) {
     ScrollableTabPage tabPage;
     tabPage.page = new QWidget(parent);
@@ -175,6 +188,34 @@ QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic se
         return QStringLiteral("count");
     case renderer::parametric_model::ParametricInputSemantic::offset:
         return QStringLiteral("offset");
+    }
+
+    return QStringLiteral("unknown");
+}
+
+QString diagnosticSeverityText(renderer::parametric_model::EvaluationDiagnosticSeverity severity) {
+    switch (severity) {
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::info:
+        return QStringLiteral("info");
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::warning:
+        return QStringLiteral("warning");
+    case renderer::parametric_model::EvaluationDiagnosticSeverity::error:
+        return QStringLiteral("error");
+    }
+
+    return QStringLiteral("unknown");
+}
+
+QString diagnosticCodeText(renderer::parametric_model::EvaluationDiagnosticCode code) {
+    switch (code) {
+    case renderer::parametric_model::EvaluationDiagnosticCode::value_clamped:
+        return QStringLiteral("value_clamped");
+    case renderer::parametric_model::EvaluationDiagnosticCode::missing_node:
+        return QStringLiteral("missing_node");
+    case renderer::parametric_model::EvaluationDiagnosticCode::invalid_feature_order:
+        return QStringLiteral("invalid_feature_order");
+    case renderer::parametric_model::EvaluationDiagnosticCode::empty_model:
+        return QStringLiteral("empty_model");
     }
 
     return QStringLiteral("unknown");
@@ -677,6 +718,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     parametricBoundsListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     parametricBoundsLayout->addWidget(parametricBoundsListWidget_);
 
+    auto* evaluationSummaryGroup = new QGroupBox("Evaluation Summary", parametricTab.content);
+    auto* evaluationSummaryLayout = new QVBoxLayout(evaluationSummaryGroup);
+    evaluationSummaryLabel_ = new QLabel("No active object", evaluationSummaryGroup);
+    evaluationSummaryLabel_->setWordWrap(true);
+    evaluationSummaryLayout->addWidget(evaluationSummaryLabel_);
+
     auto* overlayGroup = new QGroupBox("Viewport Display", parametricTab.content);
     auto* overlayLayout = new QVBoxLayout(overlayGroup);
     showParametricBoundsCheckBox_ = new QCheckBox("Model Bounds", overlayGroup);
@@ -727,6 +774,18 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     constructionLinkListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     constructionLinkLayout->addWidget(constructionLinkListWidget_);
 
+    auto* derivedParameterGroup = new QGroupBox("Derived Parameters", parametricTab.content);
+    auto* derivedParameterLayout = new QVBoxLayout(derivedParameterGroup);
+    derivedParameterListWidget_ = new QListWidget(derivedParameterGroup);
+    derivedParameterListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    derivedParameterLayout->addWidget(derivedParameterListWidget_);
+
+    auto* evaluationDiagnosticGroup = new QGroupBox("Evaluation Diagnostics", parametricTab.content);
+    auto* evaluationDiagnosticLayout = new QVBoxLayout(evaluationDiagnosticGroup);
+    evaluationDiagnosticListWidget_ = new QListWidget(evaluationDiagnosticGroup);
+    evaluationDiagnosticListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    evaluationDiagnosticLayout->addWidget(evaluationDiagnosticListWidget_);
+
     auto* debugActionGroup = new QGroupBox("Debug Actions", debugTab.content);
     auto* debugActionLayout = new QVBoxLayout(debugActionGroup);
 
@@ -743,12 +802,15 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     cameraTab.contentLayout->addWidget(cameraActionGroup);
     cameraTab.contentLayout->addStretch(1);
 
+    parametricTab.contentLayout->addWidget(evaluationSummaryGroup);
     parametricTab.contentLayout->addWidget(parametricBoundsGroup);
     parametricTab.contentLayout->addWidget(overlayGroup);
     parametricTab.contentLayout->addWidget(unitGroup);
     parametricTab.contentLayout->addWidget(unitInputGroup);
     parametricTab.contentLayout->addWidget(nodeUsageGroup);
     parametricTab.contentLayout->addWidget(constructionLinkGroup);
+    parametricTab.contentLayout->addWidget(derivedParameterGroup);
+    parametricTab.contentLayout->addWidget(evaluationDiagnosticGroup);
     parametricTab.contentLayout->addStretch(1);
 
     debugTab.contentLayout->addWidget(boundsGroup);
@@ -1026,15 +1088,23 @@ void ViewerControlPanel::refreshBoundsList() {
 }
 
 void ViewerControlPanel::refreshParametricDebugPage() {
-    if (parametricBoundsListWidget_ == nullptr
+    if (evaluationSummaryLabel_ == nullptr
+        || parametricBoundsListWidget_ == nullptr
         || unitListWidget_ == nullptr
         || unitInputListWidget_ == nullptr
         || nodeUsageListWidget_ == nullptr
-        || constructionLinkListWidget_ == nullptr) {
+        || constructionLinkListWidget_ == nullptr
+        || derivedParameterListWidget_ == nullptr
+        || evaluationDiagnosticListWidget_ == nullptr) {
         return;
     }
 
     const auto* objectState = currentObjectState();
+
+    evaluationSummaryLabel_->setText(
+        objectState != nullptr
+            ? formatEvaluationSummaryText(objectState->evaluationSummary)
+            : QStringLiteral("No active object"));
 
     const QSignalBlocker boundsBlocker(parametricBoundsListWidget_);
     parametricBoundsListWidget_->clear();
@@ -1045,6 +1115,9 @@ void ViewerControlPanel::refreshParametricDebugPage() {
     const QSignalBlocker unitBlocker(unitListWidget_);
     unitListWidget_->clear();
     if (objectState != nullptr) {
+        if (objectState->units.empty()) {
+            unitListWidget_->addItem(QStringLiteral("No units"));
+        }
         for (const auto& unit : objectState->units) {
             unitListWidget_->addItem(
                 QStringLiteral("unit:%1  feature:%2\n%3\n%4")
@@ -1058,6 +1131,9 @@ void ViewerControlPanel::refreshParametricDebugPage() {
     const QSignalBlocker inputBlocker(unitInputListWidget_);
     unitInputListWidget_->clear();
     if (objectState != nullptr) {
+        if (objectState->unitInputs.empty()) {
+            unitInputListWidget_->addItem(QStringLiteral("No unit inputs"));
+        }
         for (const auto& input : objectState->unitInputs) {
             unitInputListWidget_->addItem(
                 QStringLiteral("unit:%1  feature:%2  %3 : %4%5")
@@ -1072,6 +1148,9 @@ void ViewerControlPanel::refreshParametricDebugPage() {
     const QSignalBlocker usageBlocker(nodeUsageListWidget_);
     nodeUsageListWidget_->clear();
     if (objectState != nullptr) {
+        if (objectState->nodeUsages.empty()) {
+            nodeUsageListWidget_->addItem(QStringLiteral("No node usages"));
+        }
         for (const auto& usage : objectState->nodeUsages) {
             nodeUsageListWidget_->addItem(
                 QStringLiteral("node:%1 -> unit:%2  feature:%3  as %4")
@@ -1082,9 +1161,47 @@ void ViewerControlPanel::refreshParametricDebugPage() {
         }
     }
 
+    const QSignalBlocker parameterBlocker(derivedParameterListWidget_);
+    derivedParameterListWidget_->clear();
+    if (objectState != nullptr) {
+        if (objectState->derivedParameters.empty()) {
+            derivedParameterListWidget_->addItem(QStringLiteral("No derived parameters"));
+        }
+        for (const auto& parameter : objectState->derivedParameters) {
+            derivedParameterListWidget_->addItem(
+                QStringLiteral("unit:%1  feature:%2\n%3 = %4\nnode:%5 -> node:%6")
+                    .arg(parameter.unitId)
+                    .arg(parameter.featureId)
+                    .arg(inputSemanticText(parameter.semantic))
+                    .arg(parameter.value, 0, 'f', 4)
+                    .arg(parameter.referenceNodeId)
+                    .arg(parameter.sourceNodeId));
+        }
+    }
+
+    const QSignalBlocker diagnosticBlocker(evaluationDiagnosticListWidget_);
+    evaluationDiagnosticListWidget_->clear();
+    if (objectState != nullptr) {
+        if (objectState->evaluationDiagnostics.empty()) {
+            evaluationDiagnosticListWidget_->addItem(QStringLiteral("No diagnostics"));
+        }
+        for (const auto& diagnostic : objectState->evaluationDiagnostics) {
+            evaluationDiagnosticListWidget_->addItem(
+                QStringLiteral("%1  %2\nfeature:%3  node:%4\n%5")
+                    .arg(diagnosticSeverityText(diagnostic.severity))
+                    .arg(diagnosticCodeText(diagnostic.code))
+                    .arg(diagnostic.featureId)
+                    .arg(diagnostic.nodeId)
+                    .arg(QString::fromStdString(diagnostic.message)));
+        }
+    }
+
     const QSignalBlocker linkBlocker(constructionLinkListWidget_);
     constructionLinkListWidget_->clear();
     if (objectState != nullptr) {
+        if (objectState->constructionLinks.empty()) {
+            constructionLinkListWidget_->addItem(QStringLiteral("No construction links"));
+        }
         for (const auto& link : objectState->constructionLinks) {
             constructionLinkListWidget_->addItem(
                 QStringLiteral("unit:%1  feature:%2\n%3\nnode:%4 (%5) -> node:%6 (%7)")

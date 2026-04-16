@@ -1,5 +1,7 @@
 #include "renderer/parametric_model/model_structure.h"
 
+#include <cmath>
+
 namespace renderer::parametric_model {
 namespace {
 
@@ -61,6 +63,57 @@ void appendConstructionLink(
     link.startSemantic = centerInput->semantic;
     link.endSemantic = endInput->semantic;
     links.push_back(link);
+}
+
+const ParametricNodeDescriptor* findPointNode(
+    const ParametricObjectDescriptor& descriptor,
+    ParametricNodeId nodeId)
+{
+    for (const auto& node : descriptor.nodes) {
+        if (node.id == nodeId && node.kind == ParametricNodeKind::point) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+void appendDerivedParameter(
+    std::vector<ParametricDerivedParameterDescriptor>& parameters,
+    const FeatureDescriptor& feature,
+    ParametricConstructionKind constructionKind,
+    ParametricInputSemantic semantic,
+    float value,
+    ParametricNodeId referenceNodeId,
+    ParametricNodeId sourceNodeId)
+{
+    ParametricDerivedParameterDescriptor parameter;
+    parameter.unitId = effectiveUnitId(feature);
+    parameter.featureId = feature.id;
+    parameter.constructionKind = constructionKind;
+    parameter.semantic = semantic;
+    parameter.value = value;
+    parameter.referenceNodeId = referenceNodeId;
+    parameter.sourceNodeId = sourceNodeId;
+    parameters.push_back(parameter);
+}
+
+float distance3(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    const float dx = left.x - right.x;
+    const float dy = left.y - right.y;
+    const float dz = left.z - right.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+float distanceInCylinderPlane(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    const float dx = left.x - right.x;
+    const float dz = left.z - right.z;
+    return std::sqrt(dx * dx + dz * dz);
 }
 
 }  // namespace
@@ -275,6 +328,100 @@ std::vector<ParametricConstructionLinkDescriptor> ParametricModelStructure::desc
     }
 
     return links;
+}
+
+std::vector<ParametricDerivedParameterDescriptor> ParametricModelStructure::describeDerivedParameters(
+    const ParametricObjectDescriptor& descriptor)
+{
+    std::vector<ParametricDerivedParameterDescriptor> parameters;
+
+    for (const auto& feature : descriptor.features) {
+        if (!feature.enabled || feature.kind != FeatureKind::primitive) {
+            continue;
+        }
+
+        const auto constructionKind = constructionKindForFeature(feature);
+        switch (constructionKind) {
+        case ParametricConstructionKind::box_center_corner_point: {
+            const auto& box = feature.primitive.box;
+            const auto* centerNode = findPointNode(descriptor, box.center.id);
+            const auto* cornerNode = findPointNode(descriptor, box.cornerPoint.id);
+            if (centerNode == nullptr || cornerNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::width,
+                std::abs((cornerNode->point.position.x - centerNode->point.position.x) * 2.0F),
+                centerNode->id,
+                cornerNode->id);
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::height,
+                std::abs((cornerNode->point.position.y - centerNode->point.position.y) * 2.0F),
+                centerNode->id,
+                cornerNode->id);
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::depth,
+                std::abs((cornerNode->point.position.z - centerNode->point.position.z) * 2.0F),
+                centerNode->id,
+                cornerNode->id);
+            break;
+        }
+        case ParametricConstructionKind::cylinder_center_radius_point_height: {
+            const auto& cylinder = feature.primitive.cylinder;
+            const auto* centerNode = findPointNode(descriptor, cylinder.center.id);
+            const auto* radiusNode = findPointNode(descriptor, cylinder.radiusPoint.id);
+            if (centerNode == nullptr || radiusNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::radius,
+                distanceInCylinderPlane(radiusNode->point.position, centerNode->point.position),
+                centerNode->id,
+                radiusNode->id);
+            break;
+        }
+        case ParametricConstructionKind::sphere_center_surface_point: {
+            const auto& sphere = feature.primitive.sphere;
+            const auto* centerNode = findPointNode(descriptor, sphere.center.id);
+            const auto* surfaceNode = findPointNode(descriptor, sphere.surfacePoint.id);
+            if (centerNode == nullptr || surfaceNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::radius,
+                distance3(surfaceNode->point.position, centerNode->point.position),
+                centerNode->id,
+                surfaceNode->id);
+            break;
+        }
+        case ParametricConstructionKind::box_center_size:
+        case ParametricConstructionKind::cylinder_center_radius_height:
+        case ParametricConstructionKind::sphere_center_radius:
+        case ParametricConstructionKind::mirror_axis_plane:
+        case ParametricConstructionKind::linear_array_count_offset:
+            break;
+        }
+    }
+
+    return parameters;
 }
 
 }  // namespace renderer::parametric_model
