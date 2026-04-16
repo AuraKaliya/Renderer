@@ -42,6 +42,15 @@ float lengthVec3(const scene_contract::Vec3f& value) {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
 }
 
+float radiusInCylinderPlane(
+    const scene_contract::Vec3f& radiusPoint,
+    const scene_contract::Vec3f& center)
+{
+    const float dx = radiusPoint.x - center.x;
+    const float dz = radiusPoint.z - center.z;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
 }  // namespace
 
 ParametricNodeDescriptor PrimitiveFactory::makePointNode(
@@ -140,9 +149,31 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricBoxFromCenterSize(
     auto centerNode = makePointNode(center);
     auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
     if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.box.constructionMode = BoxSpec::ConstructionMode::center_size;
         primitiveFeature->primitive.box.center = {centerNode.id};
     }
     descriptor.nodes.push_back(centerNode);
+    return descriptor;
+}
+
+ParametricObjectDescriptor PrimitiveFactory::makeParametricBoxFromCenterCornerPoint(
+    const scene_contract::Vec3f& center,
+    const scene_contract::Vec3f& cornerPoint)
+{
+    const float width = std::abs((cornerPoint.x - center.x) * 2.0F);
+    const float height = std::abs((cornerPoint.y - center.y) * 2.0F);
+    const float depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    auto descriptor = makeParametricObject(makeBoxDescriptor(width, height, depth));
+    auto centerNode = makePointNode(center);
+    auto cornerNode = makePointNode(cornerPoint);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.box.constructionMode = BoxSpec::ConstructionMode::center_corner_point;
+        primitiveFeature->primitive.box.center = {centerNode.id};
+        primitiveFeature->primitive.box.cornerPoint = {cornerNode.id};
+    }
+    descriptor.nodes.push_back(centerNode);
+    descriptor.nodes.push_back(cornerNode);
     return descriptor;
 }
 
@@ -156,9 +187,31 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromCenterRad
     auto centerNode = makePointNode(center);
     auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
     if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.cylinder.constructionMode = CylinderSpec::ConstructionMode::center_radius_height;
         primitiveFeature->primitive.cylinder.center = {centerNode.id};
     }
     descriptor.nodes.push_back(centerNode);
+    return descriptor;
+}
+
+ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromCenterRadiusPointHeight(
+    const scene_contract::Vec3f& center,
+    const scene_contract::Vec3f& radiusPoint,
+    float height,
+    std::uint32_t segments)
+{
+    const float radius = radiusInCylinderPlane(radiusPoint, center);
+    auto descriptor = makeParametricObject(makeCylinderDescriptor(radius, height, segments));
+    auto centerNode = makePointNode(center);
+    auto radiusNode = makePointNode(radiusPoint);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.cylinder.constructionMode = CylinderSpec::ConstructionMode::center_radius_point_height;
+        primitiveFeature->primitive.cylinder.center = {centerNode.id};
+        primitiveFeature->primitive.cylinder.radiusPoint = {radiusNode.id};
+    }
+    descriptor.nodes.push_back(centerNode);
+    descriptor.nodes.push_back(radiusNode);
     return descriptor;
 }
 

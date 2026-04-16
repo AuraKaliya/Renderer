@@ -137,6 +137,15 @@ float lengthVec3(const scene_contract::Vec3f& value) {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
 }
 
+float radiusInCylinderPlane(
+    const scene_contract::Vec3f& radiusPoint,
+    const scene_contract::Vec3f& center)
+{
+    const float dx = radiusPoint.x - center.x;
+    const float dz = radiusPoint.z - center.z;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
 void translateMesh(scene_contract::MeshData& mesh, const scene_contract::Vec3f& offset) {
     if (offset.x == 0.0F && offset.y == 0.0F && offset.z == 0.0F) {
         return;
@@ -489,6 +498,23 @@ scene_contract::MeshData buildBoxMesh(
     ParametricFeatureId featureId)
 {
     const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    if (spec.constructionMode == BoxSpec::ConstructionMode::center_corner_point) {
+        const scene_contract::Vec3f defaultCornerPoint = {
+            center.x + spec.width * 0.5F,
+            center.y + spec.height * 0.5F,
+            center.z + spec.depth * 0.5F
+        };
+        const auto cornerPoint = resolvePointNode(
+            nodes,
+            spec.cornerPoint,
+            defaultCornerPoint,
+            &diagnostics,
+            featureId);
+        spec.width = std::abs((cornerPoint.x - center.x) * 2.0F);
+        spec.height = std::abs((cornerPoint.y - center.y) * 2.0F);
+        spec.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    }
+
     auto mesh = buildBoxMesh(normalizeBoxSpec(spec, diagnostics, featureId));
     translateMesh(mesh, center);
     return mesh;
@@ -554,6 +580,21 @@ scene_contract::MeshData buildCylinderMesh(
     ParametricFeatureId featureId)
 {
     const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    if (spec.constructionMode == CylinderSpec::ConstructionMode::center_radius_point_height) {
+        const scene_contract::Vec3f defaultRadiusPoint = {
+            center.x + spec.radius,
+            center.y,
+            center.z
+        };
+        const auto radiusPoint = resolvePointNode(
+            nodes,
+            spec.radiusPoint,
+            defaultRadiusPoint,
+            &diagnostics,
+            featureId);
+        spec.radius = radiusInCylinderPlane(radiusPoint, center);
+    }
+
     auto mesh = buildCylinderMesh(normalizeCylinderSpec(spec, diagnostics, featureId));
     translateMesh(mesh, center);
     return mesh;

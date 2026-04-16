@@ -1,5 +1,73 @@
 # Errors
 
+## [ERR-20260416-002] apply-patch-context-mismatch
+
+**Logged**: 2026-04-16T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: config
+
+### Summary
+An `apply_patch` update failed because the expected context did not match the current file text.
+
+### Error
+```text
+apply_patch verification failed: Failed to find expected lines
+```
+
+### Context
+- Operation: attempted to patch `src/test_viewer/src/viewer_control_panel.cpp` using an outdated snippet.
+- Cause: the local file used user-facing `QStringLiteral(...)` text, while the patch expected simpler raw string returns.
+- Impact: no code was changed by the failed patch; the file was reopened and patched with the correct surrounding context.
+
+### Suggested Fix
+For UI helper switches, read the current function body before patching string-return cases, especially when previous edits may have changed labels or wrappers.
+
+### Metadata
+- Reproducible: yes
+- Related Files: src/test_viewer/src/viewer_control_panel.cpp
+
+### Resolution
+- **Resolved**: 2026-04-16T00:00:00+08:00
+- **Notes**: Re-read the current snippet and applied the corrected patch successfully.
+
+---
+
+## [ERR-20260416-001] qt-moc-spawn-sandbox
+
+**Logged**: 2026-04-16T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: config
+
+### Summary
+Sandboxed build blocked the Qt `moc.exe` subprocess during `test_viewer` autogen.
+
+### Error
+```text
+AutoMoc subprocess error
+libuv process spawn failed: operation not permitted
+```
+
+### Context
+- Command: `cmake --build build --config Debug --target test_viewer`
+- The build reached Qt AutoMoc for `viewer_control_panel.h`.
+- This was caused by process spawn restrictions, not by a C++ or Qt source error.
+
+### Suggested Fix
+When Qt AutoMoc fails with `operation not permitted` under sandboxing, rerun the same CMake build with escalated permissions.
+
+### Metadata
+- Reproducible: yes
+- Related Files: src/test_viewer/src/viewer_control_panel.h
+
+### Resolution
+- **Resolved**: 2026-04-16T00:00:00+08:00
+- **Commit/PR**: pending
+- **Notes**: Reran `cmake --build build --config Debug --target test_viewer` with approved escalation and the build passed.
+
+---
+
 ## [ERR-20260415-001] cpp-pointer-member-access
 
 **Logged**: 2026-04-15T00:00:00+08:00

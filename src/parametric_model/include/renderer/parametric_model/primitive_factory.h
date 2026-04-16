@@ -41,9 +41,19 @@ public:
         float height,
         float depth);
 
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricBoxFromCenterCornerPoint(
+        const scene_contract::Vec3f& center,
+        const scene_contract::Vec3f& cornerPoint);
+
     [[nodiscard]] static ParametricObjectDescriptor makeParametricCylinderFromCenterRadiusHeight(
         const scene_contract::Vec3f& center,
         float radius,
+        float height,
+        std::uint32_t segments = 24U);
+
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricCylinderFromCenterRadiusPointHeight(
+        const scene_contract::Vec3f& center,
+        const scene_contract::Vec3f& radiusPoint,
         float height,
         std::uint32_t segments = 24U);
 

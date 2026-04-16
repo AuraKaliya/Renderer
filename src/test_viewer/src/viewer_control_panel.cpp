@@ -107,8 +107,12 @@ QString constructionKindText(renderer::parametric_model::ParametricConstructionK
     switch (kind) {
     case renderer::parametric_model::ParametricConstructionKind::box_center_size:
         return QStringLiteral("Box: center + size");
+    case renderer::parametric_model::ParametricConstructionKind::box_center_corner_point:
+        return QStringLiteral("Box: center + corner point");
     case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_height:
         return QStringLiteral("Cylinder: center + radius + height");
+    case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_point_height:
+        return QStringLiteral("Cylinder: center + radius point + height");
     case renderer::parametric_model::ParametricConstructionKind::sphere_center_radius:
         return QStringLiteral("Sphere: center + radius");
     case renderer::parametric_model::ParametricConstructionKind::sphere_center_surface_point:
@@ -145,6 +149,10 @@ QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic se
         return QStringLiteral("center");
     case renderer::parametric_model::ParametricInputSemantic::surface_point:
         return QStringLiteral("surface point");
+    case renderer::parametric_model::ParametricInputSemantic::corner_point:
+        return QStringLiteral("corner point");
+    case renderer::parametric_model::ParametricInputSemantic::radius_point:
+        return QStringLiteral("radius point");
     case renderer::parametric_model::ParametricInputSemantic::width:
         return QStringLiteral("width");
     case renderer::parametric_model::ParametricInputSemantic::height:
@@ -184,6 +192,25 @@ QString inspectorTitleForObject(const ViewerControlPanel::SceneObjectPanelState&
     return QStringLiteral("%1 Object [id:%2]")
         .arg(primitiveKindText(objectState.primitiveKind))
         .arg(objectState.id);
+}
+
+QString nodeUsageSummary(
+    const ViewerControlPanel::SceneObjectPanelState& objectState,
+    renderer::parametric_model::ParametricNodeId nodeId)
+{
+    QString summary;
+    for (const auto& usage : objectState.nodeUsages) {
+        if (usage.nodeId != nodeId) {
+            continue;
+        }
+
+        if (!summary.isEmpty()) {
+            summary += QStringLiteral(", ");
+        }
+        summary += inputSemanticText(usage.semantic);
+    }
+
+    return summary;
 }
 
 }  // namespace
@@ -525,6 +552,9 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
         sceneTab.contentLayout->addWidget(objectWidget);
     }
 
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxConstructionModeChanged, this, [this](int mode) {
+        emit boxConstructionModeChanged(mode);
+    });
     connect(objectWidgets_[0], &SceneObjectControlWidget::boxWidthChanged, this, [this](float width) {
         emit boxWidthChanged(width);
     });
@@ -534,6 +564,15 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(objectWidgets_[0], &SceneObjectControlWidget::boxDepthChanged, this, [this](float depth) {
         emit boxDepthChanged(depth);
     });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxCenterChanged, this, [this](float x, float y, float z) {
+        emit boxCenterChanged(x, y, z);
+    });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxCornerPointChanged, this, [this](float x, float y, float z) {
+        emit boxCornerPointChanged(x, y, z);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderConstructionModeChanged, this, [this](int mode) {
+        emit cylinderConstructionModeChanged(mode);
+    });
     connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderRadiusChanged, this, [this](float radius) {
         emit cylinderRadiusChanged(radius);
     });
@@ -542,6 +581,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     });
     connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderSegmentsChanged, this, [this](int segments) {
         emit cylinderSegmentsChanged(segments);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderCenterChanged, this, [this](float x, float y, float z) {
+        emit cylinderCenterChanged(x, y, z);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderRadiusPointChanged, this, [this](float x, float y, float z) {
+        emit cylinderRadiusPointChanged(x, y, z);
     });
     connect(objectWidgets_[2], &SceneObjectControlWidget::sphereRadiusChanged, this, [this](float radius) {
         emit sphereRadiusChanged(radius);
@@ -632,6 +677,32 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     parametricBoundsListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     parametricBoundsLayout->addWidget(parametricBoundsListWidget_);
 
+    auto* overlayGroup = new QGroupBox("Viewport Display", parametricTab.content);
+    auto* overlayLayout = new QVBoxLayout(overlayGroup);
+    showParametricBoundsCheckBox_ = new QCheckBox("Model Bounds", overlayGroup);
+    showParametricNodesCheckBox_ = new QCheckBox("Node Points", overlayGroup);
+    showParametricLinksCheckBox_ = new QCheckBox("Construction Links", overlayGroup);
+    showParametricBoundsCheckBox_->setChecked(true);
+    showParametricNodesCheckBox_->setChecked(true);
+    showParametricLinksCheckBox_->setChecked(true);
+    connect(showParametricBoundsCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        emit parametricOverlayModelBoundsChanged(checked);
+    });
+    connect(showParametricNodesCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        emit parametricOverlayNodePointsChanged(checked);
+    });
+    connect(showParametricLinksCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        emit parametricOverlayConstructionLinksChanged(checked);
+    });
+    overlayLayout->addWidget(showParametricBoundsCheckBox_);
+    overlayLayout->addWidget(showParametricNodesCheckBox_);
+    overlayLayout->addWidget(showParametricLinksCheckBox_);
+    auto* overlayHintLabel = new QLabel(
+        "Debug overlay only. These marks do not affect picking or model geometry.",
+        overlayGroup);
+    overlayHintLabel->setWordWrap(true);
+    overlayLayout->addWidget(overlayHintLabel);
+
     auto* unitGroup = new QGroupBox("Units", parametricTab.content);
     auto* unitLayout = new QVBoxLayout(unitGroup);
     unitListWidget_ = new QListWidget(unitGroup);
@@ -650,6 +721,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     nodeUsageListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     nodeUsageLayout->addWidget(nodeUsageListWidget_);
 
+    auto* constructionLinkGroup = new QGroupBox("Construction Links", parametricTab.content);
+    auto* constructionLinkLayout = new QVBoxLayout(constructionLinkGroup);
+    constructionLinkListWidget_ = new QListWidget(constructionLinkGroup);
+    constructionLinkListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    constructionLinkLayout->addWidget(constructionLinkListWidget_);
+
     auto* debugActionGroup = new QGroupBox("Debug Actions", debugTab.content);
     auto* debugActionLayout = new QVBoxLayout(debugActionGroup);
 
@@ -667,9 +744,11 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     cameraTab.contentLayout->addStretch(1);
 
     parametricTab.contentLayout->addWidget(parametricBoundsGroup);
+    parametricTab.contentLayout->addWidget(overlayGroup);
     parametricTab.contentLayout->addWidget(unitGroup);
     parametricTab.contentLayout->addWidget(unitInputGroup);
     parametricTab.contentLayout->addWidget(nodeUsageGroup);
+    parametricTab.contentLayout->addWidget(constructionLinkGroup);
     parametricTab.contentLayout->addStretch(1);
 
     debugTab.contentLayout->addWidget(boundsGroup);
@@ -849,9 +928,11 @@ void ViewerControlPanel::refreshNodeExplorer() {
     int selectedRow = -1;
     for (int row = 0; row < static_cast<int>(objectState->nodes.size()); ++row) {
         const auto& node = objectState->nodes[static_cast<std::size_t>(row)];
+        const auto usageSummary = nodeUsageSummary(*objectState, node.id);
         auto* item = new QListWidgetItem(
-            QStringLiteral("Point [id:%1]  (%2, %3, %4)")
+            QStringLiteral("Point [id:%1]%2  (%3, %4, %5)")
                 .arg(node.id)
+                .arg(!usageSummary.isEmpty() ? QStringLiteral("  [%1]").arg(usageSummary) : QString())
                 .arg(node.point.position.x, 0, 'f', 2)
                 .arg(node.point.position.y, 0, 'f', 2)
                 .arg(node.point.position.z, 0, 'f', 2),
@@ -912,10 +993,10 @@ void ViewerControlPanel::refreshObjectInspector() {
 
     switch (objectState->primitive.kind) {
     case renderer::parametric_model::PrimitiveKind::box:
-        objectWidget->setBoxSpec(objectState->primitive.box);
+        objectWidget->setBoxSpec(objectState->primitive.box, objectState->nodes);
         break;
     case renderer::parametric_model::PrimitiveKind::cylinder:
-        objectWidget->setCylinderSpec(objectState->primitive.cylinder);
+        objectWidget->setCylinderSpec(objectState->primitive.cylinder, objectState->nodes);
         break;
     case renderer::parametric_model::PrimitiveKind::sphere:
         objectWidget->setSphereSpec(objectState->primitive.sphere, objectState->nodes);
@@ -948,7 +1029,8 @@ void ViewerControlPanel::refreshParametricDebugPage() {
     if (parametricBoundsListWidget_ == nullptr
         || unitListWidget_ == nullptr
         || unitInputListWidget_ == nullptr
-        || nodeUsageListWidget_ == nullptr) {
+        || nodeUsageListWidget_ == nullptr
+        || constructionLinkListWidget_ == nullptr) {
         return;
     }
 
@@ -997,6 +1079,22 @@ void ViewerControlPanel::refreshParametricDebugPage() {
                     .arg(usage.unitId)
                     .arg(usage.featureId)
                     .arg(inputSemanticText(usage.semantic)));
+        }
+    }
+
+    const QSignalBlocker linkBlocker(constructionLinkListWidget_);
+    constructionLinkListWidget_->clear();
+    if (objectState != nullptr) {
+        for (const auto& link : objectState->constructionLinks) {
+            constructionLinkListWidget_->addItem(
+                QStringLiteral("unit:%1  feature:%2\n%3\nnode:%4 (%5) -> node:%6 (%7)")
+                    .arg(link.unitId)
+                    .arg(link.featureId)
+                    .arg(constructionKindText(link.constructionKind))
+                    .arg(link.startNodeId)
+                    .arg(inputSemanticText(link.startSemantic))
+                    .arg(link.endNodeId)
+                    .arg(inputSemanticText(link.endSemantic)));
         }
     }
 }

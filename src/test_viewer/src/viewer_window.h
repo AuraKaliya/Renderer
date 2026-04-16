@@ -17,6 +17,7 @@ class QFocusEvent;
 class QEvent;
 class QWheelEvent;
 class QPointF;
+class QPainter;
 
 #include "orbit_camera_controller.h"
 #include "model_change_view_state.h"
@@ -70,18 +71,27 @@ private:
         [[nodiscard]] float verticalFovDegrees() const;
         void setOrthographicHeight(float height);
         [[nodiscard]] float orthographicHeight() const;
+        void setBoxConstructionMode(renderer::parametric_model::BoxSpec::ConstructionMode mode);
         void setBoxWidth(float width);
         void setBoxHeight(float height);
         void setBoxDepth(float depth);
+        void setBoxCenter(const renderer::scene_contract::Vec3f& center);
+        void setBoxCornerPoint(const renderer::scene_contract::Vec3f& cornerPoint);
+        void setCylinderConstructionMode(renderer::parametric_model::CylinderSpec::ConstructionMode mode);
         void setCylinderRadius(float radius);
         void setCylinderHeight(float height);
         void setCylinderSegments(std::uint32_t segments);
+        void setCylinderCenter(const renderer::scene_contract::Vec3f& center);
+        void setCylinderRadiusPoint(const renderer::scene_contract::Vec3f& radiusPoint);
         void setSphereRadius(float radius);
         void setSphereSlices(std::uint32_t slices);
         void setSphereStacks(std::uint32_t stacks);
         void setSphereConstructionMode(renderer::parametric_model::SphereSpec::ConstructionMode mode);
         void setSphereCenter(const renderer::scene_contract::Vec3f& center);
         void setSphereSurfacePoint(const renderer::scene_contract::Vec3f& surfacePoint);
+        void setParametricOverlayModelBoundsVisible(bool visible);
+        void setParametricOverlayNodePointsVisible(bool visible);
+        void setParametricOverlayConstructionLinksVisible(bool visible);
         void setObjectMirrorEnabled(int index, bool enabled);
         void setObjectMirrorAxis(int index, renderer::parametric_model::Axis axis);
         void setObjectMirrorPlaneOffset(int index, float planeOffset);
@@ -190,6 +200,24 @@ private:
         [[nodiscard]] renderer::scene_contract::Aabb objectFocusBounds(int index) const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleFocusBounds() const;
         [[nodiscard]] renderer::scene_contract::Aabb visibleSceneWorldBounds() const;
+        void paintParametricOverlay();
+        void paintParametricBoundsOverlay(
+            QPainter& painter,
+            const renderer::scene_contract::CameraData& camera,
+            const SceneObject& sceneObject,
+            const renderer::scene_contract::TransformData& transform) const;
+        void paintParametricConstructionLinksOverlay(
+            QPainter& painter,
+            const renderer::scene_contract::CameraData& camera,
+            const SceneObject& sceneObject,
+            const renderer::scene_contract::TransformData& transform,
+            const std::vector<renderer::parametric_model::ParametricConstructionLinkDescriptor>& links) const;
+        void paintParametricNodePointsOverlay(
+            QPainter& painter,
+            const renderer::scene_contract::CameraData& camera,
+            const SceneObject& sceneObject,
+            const renderer::scene_contract::TransformData& transform,
+            const std::vector<renderer::parametric_model::ParametricNodeUsageDescriptor>& nodeUsages) const;
         void rebuildFramePacket();
 
         struct SceneObject {
@@ -234,6 +262,9 @@ private:
         bool leftButtonDragged_ = false;
         bool rotating_ = false;
         bool panning_ = false;
+        bool showParametricModelBounds_ = true;
+        bool showParametricNodePoints_ = true;
+        bool showParametricConstructionLinks_ = true;
         QTimer frameTimer_;
         QElapsedTimer animationClock_;
     };

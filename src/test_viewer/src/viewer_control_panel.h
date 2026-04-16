@@ -64,6 +64,17 @@ public:
         renderer::parametric_model::ParametricInputSemantic semantic = renderer::parametric_model::ParametricInputSemantic::center;
     };
 
+    struct ConstructionLinkPanelState {
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricConstructionKind constructionKind =
+            renderer::parametric_model::ParametricConstructionKind::box_center_size;
+        renderer::parametric_model::ParametricNodeId startNodeId = 0U;
+        renderer::parametric_model::ParametricNodeId endNodeId = 0U;
+        renderer::parametric_model::ParametricInputSemantic startSemantic = renderer::parametric_model::ParametricInputSemantic::center;
+        renderer::parametric_model::ParametricInputSemantic endSemantic = renderer::parametric_model::ParametricInputSemantic::surface_point;
+    };
+
     struct SceneObjectPanelState {
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
@@ -79,6 +90,7 @@ public:
         std::vector<UnitPanelState> units;
         std::vector<UnitInputPanelState> unitInputs;
         std::vector<NodeUsagePanelState> nodeUsages;
+        std::vector<ConstructionLinkPanelState> constructionLinks;
     };
 
     struct LightingPanelState {
@@ -138,18 +150,27 @@ signals:
     void resetDefaultsRequested();
     void focusSphereRequested();
     void modelChangeViewStrategyChanged(int strategy);
+    void boxConstructionModeChanged(int mode);
     void boxWidthChanged(float width);
     void boxHeightChanged(float height);
     void boxDepthChanged(float depth);
+    void boxCenterChanged(float x, float y, float z);
+    void boxCornerPointChanged(float x, float y, float z);
+    void cylinderConstructionModeChanged(int mode);
     void cylinderRadiusChanged(float radius);
     void cylinderHeightChanged(float height);
     void cylinderSegmentsChanged(int segments);
+    void cylinderCenterChanged(float x, float y, float z);
+    void cylinderRadiusPointChanged(float x, float y, float z);
     void sphereRadiusChanged(float radius);
     void sphereSlicesChanged(int slices);
     void sphereStacksChanged(int stacks);
     void sphereConstructionModeChanged(int mode);
     void sphereCenterChanged(float x, float y, float z);
     void sphereSurfacePointChanged(float x, float y, float z);
+    void parametricOverlayModelBoundsChanged(bool visible);
+    void parametricOverlayNodePointsChanged(bool visible);
+    void parametricOverlayConstructionLinksChanged(bool visible);
 
 private:
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
@@ -179,9 +200,13 @@ private:
     QListWidget* unitListWidget_ = nullptr;
     QListWidget* unitInputListWidget_ = nullptr;
     QListWidget* nodeUsageListWidget_ = nullptr;
+    QListWidget* constructionLinkListWidget_ = nullptr;
     QLabel* objectSelectionLabel_ = nullptr;
     QLabel* featureSelectionLabel_ = nullptr;
     QCheckBox* featureEnabledCheckBox_ = nullptr;
+    QCheckBox* showParametricBoundsCheckBox_ = nullptr;
+    QCheckBox* showParametricNodesCheckBox_ = nullptr;
+    QCheckBox* showParametricLinksCheckBox_ = nullptr;
     QDoubleSpinBox* nodeXSpinBox_ = nullptr;
     QDoubleSpinBox* nodeYSpinBox_ = nullptr;
     QDoubleSpinBox* nodeZSpinBox_ = nullptr;

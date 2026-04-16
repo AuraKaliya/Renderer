@@ -103,10 +103,26 @@ SceneObjectControlWidget::SceneObjectControlWidget(
     appearanceLayout->addRow("Blue", blueSpinBox_);
 
     if (primitiveKind_ == PrimitivePanelKind::box) {
+        boxConstructionModeComboBox_ = new QComboBox(groupBox_);
+        boxConstructionModeComboBox_->addItem(
+            "Center + Size",
+            static_cast<int>(renderer::parametric_model::BoxSpec::ConstructionMode::center_size));
+        boxConstructionModeComboBox_->addItem(
+            "Center + Corner Point",
+            static_cast<int>(renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point));
         boxWidthSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
         boxHeightSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
         boxDepthSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
+        boxCenterXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        boxCenterYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        boxCenterZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        boxCornerPointXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        boxCornerPointYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        boxCornerPointZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
 
+        connect(boxConstructionModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+            emit boxConstructionModeChanged(boxConstructionModeComboBox_->itemData(index).toInt());
+        });
         connect(boxWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
             emit boxWidthChanged(static_cast<float>(value));
         });
@@ -117,16 +133,70 @@ SceneObjectControlWidget::SceneObjectControlWidget(
             emit boxDepthChanged(static_cast<float>(value));
         });
 
+        auto emitBoxCenter = [this]() {
+            emit boxCenterChanged(
+                static_cast<float>(boxCenterXSpinBox_->value()),
+                static_cast<float>(boxCenterYSpinBox_->value()),
+                static_cast<float>(boxCenterZSpinBox_->value()));
+        };
+        auto emitBoxCornerPoint = [this]() {
+            emit boxCornerPointChanged(
+                static_cast<float>(boxCornerPointXSpinBox_->value()),
+                static_cast<float>(boxCornerPointYSpinBox_->value()),
+                static_cast<float>(boxCornerPointZSpinBox_->value()));
+        };
+        connect(boxCenterXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCenter](double) {
+            emitBoxCenter();
+        });
+        connect(boxCenterYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCenter](double) {
+            emitBoxCenter();
+        });
+        connect(boxCenterZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCenter](double) {
+            emitBoxCenter();
+        });
+        connect(boxCornerPointXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCornerPoint](double) {
+            emitBoxCornerPoint();
+        });
+        connect(boxCornerPointYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCornerPoint](double) {
+            emitBoxCornerPoint();
+        });
+        connect(boxCornerPointZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitBoxCornerPoint](double) {
+            emitBoxCornerPoint();
+        });
+
+        primitiveLayout->addRow("Mode", boxConstructionModeComboBox_);
         primitiveLayout->addRow("Width", boxWidthSpinBox_);
         primitiveLayout->addRow("Height", boxHeightSpinBox_);
         primitiveLayout->addRow("Depth", boxDepthSpinBox_);
+        primitiveLayout->addRow("Center X", boxCenterXSpinBox_);
+        primitiveLayout->addRow("Center Y", boxCenterYSpinBox_);
+        primitiveLayout->addRow("Center Z", boxCenterZSpinBox_);
+        primitiveLayout->addRow("Corner X", boxCornerPointXSpinBox_);
+        primitiveLayout->addRow("Corner Y", boxCornerPointYSpinBox_);
+        primitiveLayout->addRow("Corner Z", boxCornerPointZSpinBox_);
     } else if (primitiveKind_ == PrimitivePanelKind::cylinder) {
+        cylinderConstructionModeComboBox_ = new QComboBox(groupBox_);
+        cylinderConstructionModeComboBox_->addItem(
+            "Center + Radius + Height",
+            static_cast<int>(renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_height));
+        cylinderConstructionModeComboBox_->addItem(
+            "Center + Radius Point + Height",
+            static_cast<int>(renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height));
         cylinderRadiusSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
         cylinderHeightSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
         cylinderSegmentsSpinBox_ = new QSpinBox(groupBox_);
         cylinderSegmentsSpinBox_->setRange(3, 128);
         cylinderSegmentsSpinBox_->setSingleStep(1);
+        cylinderCenterXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        cylinderCenterYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        cylinderCenterZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        cylinderRadiusPointXSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        cylinderRadiusPointYSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
+        cylinderRadiusPointZSpinBox_ = makeFloatSpinBox(groupBox_, -10.0, 10.0, 0.1, 2);
 
+        connect(cylinderConstructionModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+            emit cylinderConstructionModeChanged(cylinderConstructionModeComboBox_->itemData(index).toInt());
+        });
         connect(cylinderRadiusSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
             emit cylinderRadiusChanged(static_cast<float>(value));
         });
@@ -137,9 +207,47 @@ SceneObjectControlWidget::SceneObjectControlWidget(
             emit cylinderSegmentsChanged(value);
         });
 
+        auto emitCylinderCenter = [this]() {
+            emit cylinderCenterChanged(
+                static_cast<float>(cylinderCenterXSpinBox_->value()),
+                static_cast<float>(cylinderCenterYSpinBox_->value()),
+                static_cast<float>(cylinderCenterZSpinBox_->value()));
+        };
+        auto emitCylinderRadiusPoint = [this]() {
+            emit cylinderRadiusPointChanged(
+                static_cast<float>(cylinderRadiusPointXSpinBox_->value()),
+                static_cast<float>(cylinderRadiusPointYSpinBox_->value()),
+                static_cast<float>(cylinderRadiusPointZSpinBox_->value()));
+        };
+        connect(cylinderCenterXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderCenter](double) {
+            emitCylinderCenter();
+        });
+        connect(cylinderCenterYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderCenter](double) {
+            emitCylinderCenter();
+        });
+        connect(cylinderCenterZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderCenter](double) {
+            emitCylinderCenter();
+        });
+        connect(cylinderRadiusPointXSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderRadiusPoint](double) {
+            emitCylinderRadiusPoint();
+        });
+        connect(cylinderRadiusPointYSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderRadiusPoint](double) {
+            emitCylinderRadiusPoint();
+        });
+        connect(cylinderRadiusPointZSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [emitCylinderRadiusPoint](double) {
+            emitCylinderRadiusPoint();
+        });
+
+        primitiveLayout->addRow("Mode", cylinderConstructionModeComboBox_);
         primitiveLayout->addRow("Radius", cylinderRadiusSpinBox_);
         primitiveLayout->addRow("Height", cylinderHeightSpinBox_);
         primitiveLayout->addRow("Segments", cylinderSegmentsSpinBox_);
+        primitiveLayout->addRow("Center X", cylinderCenterXSpinBox_);
+        primitiveLayout->addRow("Center Y", cylinderCenterYSpinBox_);
+        primitiveLayout->addRow("Center Z", cylinderCenterZSpinBox_);
+        primitiveLayout->addRow("Radius X", cylinderRadiusPointXSpinBox_);
+        primitiveLayout->addRow("Radius Y", cylinderRadiusPointYSpinBox_);
+        primitiveLayout->addRow("Radius Z", cylinderRadiusPointZSpinBox_);
     } else {
         sphereRadiusSpinBox_ = makeFloatSpinBox(groupBox_, 0.05, 10.0, 0.05, 2);
         sphereSlicesSpinBox_ = new QSpinBox(groupBox_);
@@ -337,32 +445,130 @@ void SceneObjectControlWidget::setOperatorState(
     linearArrayOffsetZSpinBox_->setValue(linearArray.offset.z);
 }
 
-void SceneObjectControlWidget::setBoxSpec(const renderer::parametric_model::BoxSpec& spec) {
-    if (boxWidthSpinBox_ == nullptr || boxHeightSpinBox_ == nullptr || boxDepthSpinBox_ == nullptr) {
+void SceneObjectControlWidget::setBoxSpec(
+    const renderer::parametric_model::BoxSpec& spec,
+    const std::vector<renderer::parametric_model::ParametricNodeDescriptor>& nodes)
+{
+    if (boxConstructionModeComboBox_ == nullptr
+        || boxWidthSpinBox_ == nullptr
+        || boxHeightSpinBox_ == nullptr
+        || boxDepthSpinBox_ == nullptr
+        || boxCenterXSpinBox_ == nullptr
+        || boxCenterYSpinBox_ == nullptr
+        || boxCenterZSpinBox_ == nullptr
+        || boxCornerPointXSpinBox_ == nullptr
+        || boxCornerPointYSpinBox_ == nullptr
+        || boxCornerPointZSpinBox_ == nullptr) {
         return;
     }
 
+    const QSignalBlocker modeBlocker(boxConstructionModeComboBox_);
     const QSignalBlocker widthBlocker(boxWidthSpinBox_);
     const QSignalBlocker heightBlocker(boxHeightSpinBox_);
     const QSignalBlocker depthBlocker(boxDepthSpinBox_);
+    const QSignalBlocker centerXBlocker(boxCenterXSpinBox_);
+    const QSignalBlocker centerYBlocker(boxCenterYSpinBox_);
+    const QSignalBlocker centerZBlocker(boxCenterZSpinBox_);
+    const QSignalBlocker cornerPointXBlocker(boxCornerPointXSpinBox_);
+    const QSignalBlocker cornerPointYBlocker(boxCornerPointYSpinBox_);
+    const QSignalBlocker cornerPointZBlocker(boxCornerPointZSpinBox_);
 
+    const int modeIndex = boxConstructionModeComboBox_->findData(static_cast<int>(spec.constructionMode));
+    if (modeIndex >= 0) {
+        boxConstructionModeComboBox_->setCurrentIndex(modeIndex);
+    }
     boxWidthSpinBox_->setValue(spec.width);
     boxHeightSpinBox_->setValue(spec.height);
     boxDepthSpinBox_->setValue(spec.depth);
+
+    renderer::scene_contract::Vec3f center {};
+    if (const auto* centerNode = findPointNode(nodes, spec.center); centerNode != nullptr) {
+        center = centerNode->point.position;
+    }
+    renderer::scene_contract::Vec3f cornerPoint {
+        center.x + spec.width * 0.5F,
+        center.y + spec.height * 0.5F,
+        center.z + spec.depth * 0.5F
+    };
+    if (const auto* cornerNode = findPointNode(nodes, spec.cornerPoint); cornerNode != nullptr) {
+        cornerPoint = cornerNode->point.position;
+    }
+
+    boxCenterXSpinBox_->setValue(center.x);
+    boxCenterYSpinBox_->setValue(center.y);
+    boxCenterZSpinBox_->setValue(center.z);
+    boxCornerPointXSpinBox_->setValue(cornerPoint.x);
+    boxCornerPointYSpinBox_->setValue(cornerPoint.y);
+    boxCornerPointZSpinBox_->setValue(cornerPoint.z);
+
+    const bool usesCornerPoint =
+        spec.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point;
+    boxWidthSpinBox_->setEnabled(!usesCornerPoint);
+    boxHeightSpinBox_->setEnabled(!usesCornerPoint);
+    boxDepthSpinBox_->setEnabled(!usesCornerPoint);
+    boxCornerPointXSpinBox_->setEnabled(usesCornerPoint);
+    boxCornerPointYSpinBox_->setEnabled(usesCornerPoint);
+    boxCornerPointZSpinBox_->setEnabled(usesCornerPoint);
 }
 
-void SceneObjectControlWidget::setCylinderSpec(const renderer::parametric_model::CylinderSpec& spec) {
-    if (cylinderRadiusSpinBox_ == nullptr || cylinderHeightSpinBox_ == nullptr || cylinderSegmentsSpinBox_ == nullptr) {
+void SceneObjectControlWidget::setCylinderSpec(
+    const renderer::parametric_model::CylinderSpec& spec,
+    const std::vector<renderer::parametric_model::ParametricNodeDescriptor>& nodes)
+{
+    if (cylinderConstructionModeComboBox_ == nullptr
+        || cylinderRadiusSpinBox_ == nullptr
+        || cylinderHeightSpinBox_ == nullptr
+        || cylinderSegmentsSpinBox_ == nullptr
+        || cylinderCenterXSpinBox_ == nullptr
+        || cylinderCenterYSpinBox_ == nullptr
+        || cylinderCenterZSpinBox_ == nullptr
+        || cylinderRadiusPointXSpinBox_ == nullptr
+        || cylinderRadiusPointYSpinBox_ == nullptr
+        || cylinderRadiusPointZSpinBox_ == nullptr) {
         return;
     }
 
+    const QSignalBlocker modeBlocker(cylinderConstructionModeComboBox_);
     const QSignalBlocker radiusBlocker(cylinderRadiusSpinBox_);
     const QSignalBlocker heightBlocker(cylinderHeightSpinBox_);
     const QSignalBlocker segmentsBlocker(cylinderSegmentsSpinBox_);
+    const QSignalBlocker centerXBlocker(cylinderCenterXSpinBox_);
+    const QSignalBlocker centerYBlocker(cylinderCenterYSpinBox_);
+    const QSignalBlocker centerZBlocker(cylinderCenterZSpinBox_);
+    const QSignalBlocker radiusPointXBlocker(cylinderRadiusPointXSpinBox_);
+    const QSignalBlocker radiusPointYBlocker(cylinderRadiusPointYSpinBox_);
+    const QSignalBlocker radiusPointZBlocker(cylinderRadiusPointZSpinBox_);
 
+    const int modeIndex = cylinderConstructionModeComboBox_->findData(static_cast<int>(spec.constructionMode));
+    if (modeIndex >= 0) {
+        cylinderConstructionModeComboBox_->setCurrentIndex(modeIndex);
+    }
     cylinderRadiusSpinBox_->setValue(spec.radius);
     cylinderHeightSpinBox_->setValue(spec.height);
     cylinderSegmentsSpinBox_->setValue(static_cast<int>(spec.segments));
+
+    renderer::scene_contract::Vec3f center {};
+    if (const auto* centerNode = findPointNode(nodes, spec.center); centerNode != nullptr) {
+        center = centerNode->point.position;
+    }
+    renderer::scene_contract::Vec3f radiusPoint {center.x + spec.radius, center.y, center.z};
+    if (const auto* radiusNode = findPointNode(nodes, spec.radiusPoint); radiusNode != nullptr) {
+        radiusPoint = radiusNode->point.position;
+    }
+
+    cylinderCenterXSpinBox_->setValue(center.x);
+    cylinderCenterYSpinBox_->setValue(center.y);
+    cylinderCenterZSpinBox_->setValue(center.z);
+    cylinderRadiusPointXSpinBox_->setValue(radiusPoint.x);
+    cylinderRadiusPointYSpinBox_->setValue(radiusPoint.y);
+    cylinderRadiusPointZSpinBox_->setValue(radiusPoint.z);
+
+    const bool usesRadiusPoint =
+        spec.constructionMode == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height;
+    cylinderRadiusSpinBox_->setEnabled(!usesRadiusPoint);
+    cylinderRadiusPointXSpinBox_->setEnabled(usesRadiusPoint);
+    cylinderRadiusPointYSpinBox_->setEnabled(usesRadiusPoint);
+    cylinderRadiusPointZSpinBox_->setEnabled(usesRadiusPoint);
 }
 
 void SceneObjectControlWidget::setSphereSpec(

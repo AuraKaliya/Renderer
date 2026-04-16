@@ -10,7 +10,9 @@
 #include <QFocusEvent>
 #include <QMouseEvent>
 #include <QOpenGLContext>
+#include <QPainter>
 #include <QPointF>
+#include <QPen>
 #include <QSurfaceFormat>
 #include <QDebug>
 #include <QWheelEvent>
@@ -185,6 +187,15 @@ renderer::scene_contract::MeshData buildParametricMeshWithDiagnostics(
     return std::move(result.mesh);
 }
 
+float radiusInCylinderPlane(
+    const renderer::scene_contract::Vec3f& radiusPoint,
+    const renderer::scene_contract::Vec3f& center)
+{
+    const float dx = radiusPoint.x - center.x;
+    const float dz = radiusPoint.z - center.z;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
 const std::array<renderer::parametric_model::ParametricObjectDescriptor, kDefaultSceneObjectCount> kDefaultParametricObjects = {{
     makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::box,
@@ -307,6 +318,114 @@ struct ViewportRay {
     renderer::scene_contract::Vec3f cameraForward {0.0F, 0.0F, -1.0F};
     bool valid = false;
 };
+
+struct ProjectedPoint {
+    QPointF screen;
+    bool visible = false;
+};
+
+renderer::scene_contract::Vec4f transformPoint4(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec3f& point)
+{
+    return {
+        matrix.elements[0] * point.x + matrix.elements[4] * point.y + matrix.elements[8] * point.z + matrix.elements[12],
+        matrix.elements[1] * point.x + matrix.elements[5] * point.y + matrix.elements[9] * point.z + matrix.elements[13],
+        matrix.elements[2] * point.x + matrix.elements[6] * point.y + matrix.elements[10] * point.z + matrix.elements[14],
+        matrix.elements[3] * point.x + matrix.elements[7] * point.y + matrix.elements[11] * point.z + matrix.elements[15]
+    };
+}
+
+ProjectedPoint projectWorldPoint(
+    const renderer::scene_contract::CameraData& camera,
+    int viewportWidth,
+    int viewportHeight,
+    const renderer::scene_contract::Vec3f& point)
+{
+    ProjectedPoint projected;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+        return projected;
+    }
+
+    const auto viewProjection = renderer::scene_contract::math::multiply(camera.projection, camera.view);
+    const auto clip = transformPoint4(viewProjection, point);
+    if (std::abs(clip.w) <= kViewportZoomRayEpsilon || clip.w < 0.0F) {
+        return projected;
+    }
+
+    const float ndcX = clip.x / clip.w;
+    const float ndcY = clip.y / clip.w;
+    projected.screen = {
+        (ndcX * 0.5F + 0.5F) * static_cast<float>(viewportWidth),
+        (1.0F - (ndcY * 0.5F + 0.5F)) * static_cast<float>(viewportHeight)
+    };
+    projected.visible = true;
+    return projected;
+}
+
+const renderer::parametric_model::ParametricNodeUsageDescriptor* firstUsageForNode(
+    const std::vector<renderer::parametric_model::ParametricNodeUsageDescriptor>& usages,
+    renderer::parametric_model::ParametricNodeId nodeId)
+{
+    for (const auto& usage : usages) {
+        if (usage.nodeId == nodeId) {
+            return &usage;
+        }
+    }
+    return nullptr;
+}
+
+const char* overlaySemanticLabel(renderer::parametric_model::ParametricInputSemantic semantic) {
+    switch (semantic) {
+    case renderer::parametric_model::ParametricInputSemantic::center:
+        return "center";
+    case renderer::parametric_model::ParametricInputSemantic::surface_point:
+        return "surface";
+    case renderer::parametric_model::ParametricInputSemantic::corner_point:
+        return "corner";
+    case renderer::parametric_model::ParametricInputSemantic::radius_point:
+        return "radius point";
+    case renderer::parametric_model::ParametricInputSemantic::width:
+        return "width";
+    case renderer::parametric_model::ParametricInputSemantic::height:
+        return "height";
+    case renderer::parametric_model::ParametricInputSemantic::depth:
+        return "depth";
+    case renderer::parametric_model::ParametricInputSemantic::radius:
+        return "radius";
+    case renderer::parametric_model::ParametricInputSemantic::slices:
+        return "slices";
+    case renderer::parametric_model::ParametricInputSemantic::stacks:
+        return "stacks";
+    case renderer::parametric_model::ParametricInputSemantic::segments:
+        return "segments";
+    case renderer::parametric_model::ParametricInputSemantic::axis:
+        return "axis";
+    case renderer::parametric_model::ParametricInputSemantic::plane_offset:
+        return "plane";
+    case renderer::parametric_model::ParametricInputSemantic::count:
+        return "count";
+    case renderer::parametric_model::ParametricInputSemantic::offset:
+        return "offset";
+    }
+
+    return "input";
+}
+
+QColor overlayNodeColor(renderer::parametric_model::ParametricInputSemantic semantic) {
+    switch (semantic) {
+    case renderer::parametric_model::ParametricInputSemantic::center:
+        return QColor(124, 232, 177, 230);
+    case renderer::parametric_model::ParametricInputSemantic::surface_point:
+        return QColor(106, 208, 255, 230);
+    case renderer::parametric_model::ParametricInputSemantic::corner_point:
+        return QColor(255, 176, 92, 230);
+    case renderer::parametric_model::ParametricInputSemantic::radius_point:
+        return QColor(255, 143, 190, 230);
+    default:
+        return QColor(220, 220, 220, 225);
+    }
+}
 
 ViewportRay makeViewportRay(
     const OrbitCameraController& cameraController,
@@ -713,6 +832,10 @@ void ViewerWindow::bindControlPanelSignals() {
                 ? model_change_view::ViewStrategy::auto_frame
                 : model_change_view::ViewStrategy::keep_view);
     });
+    connect(controlPanel_, &ViewerControlPanel::boxConstructionModeChanged, this, [this](int mode) {
+        viewport_->setBoxConstructionMode(
+            static_cast<renderer::parametric_model::BoxSpec::ConstructionMode>(mode));
+    });
     connect(controlPanel_, &ViewerControlPanel::boxWidthChanged, this, [this](float width) {
         viewport_->setBoxWidth(width);
     });
@@ -722,6 +845,16 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::boxDepthChanged, this, [this](float depth) {
         viewport_->setBoxDepth(depth);
     });
+    connect(controlPanel_, &ViewerControlPanel::boxCenterChanged, this, [this](float x, float y, float z) {
+        viewport_->setBoxCenter({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::boxCornerPointChanged, this, [this](float x, float y, float z) {
+        viewport_->setBoxCornerPoint({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderConstructionModeChanged, this, [this](int mode) {
+        viewport_->setCylinderConstructionMode(
+            static_cast<renderer::parametric_model::CylinderSpec::ConstructionMode>(mode));
+    });
     connect(controlPanel_, &ViewerControlPanel::cylinderRadiusChanged, this, [this](float radius) {
         viewport_->setCylinderRadius(radius);
     });
@@ -730,6 +863,12 @@ void ViewerWindow::bindControlPanelSignals() {
     });
     connect(controlPanel_, &ViewerControlPanel::cylinderSegmentsChanged, this, [this](int segments) {
         viewport_->setCylinderSegments(static_cast<std::uint32_t>(segments));
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderCenterChanged, this, [this](float x, float y, float z) {
+        viewport_->setCylinderCenter({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderRadiusPointChanged, this, [this](float x, float y, float z) {
+        viewport_->setCylinderRadiusPoint({x, y, z});
     });
     connect(controlPanel_, &ViewerControlPanel::sphereRadiusChanged, this, [this](float radius) {
         viewport_->setSphereRadius(radius);
@@ -749,6 +888,15 @@ void ViewerWindow::bindControlPanelSignals() {
     });
     connect(controlPanel_, &ViewerControlPanel::sphereSurfacePointChanged, this, [this](float x, float y, float z) {
         viewport_->setSphereSurfacePoint({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::parametricOverlayModelBoundsChanged, this, [this](bool visible) {
+        viewport_->setParametricOverlayModelBoundsVisible(visible);
+    });
+    connect(controlPanel_, &ViewerControlPanel::parametricOverlayNodePointsChanged, this, [this](bool visible) {
+        viewport_->setParametricOverlayNodePointsVisible(visible);
+    });
+    connect(controlPanel_, &ViewerControlPanel::parametricOverlayConstructionLinksChanged, this, [this](bool visible) {
+        viewport_->setParametricOverlayConstructionLinksVisible(visible);
     });
     connect(controlPanel_, &ViewerControlPanel::cameraDistanceChanged, this, [this](float distance) {
         viewport_->setCameraDistance(distance);
@@ -1069,6 +1217,46 @@ float ViewerWindow::Viewport::orthographicHeight() const {
     return cameraController_.orthographicHeight();
 }
 
+void ViewerWindow::Viewport::setBoxConstructionMode(
+    renderer::parametric_model::BoxSpec::ConstructionMode mode)
+{
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
+    auto& box = primitive->box;
+    const auto center = resolvePointNode(descriptor, box.center, {});
+    box.center = ensurePointNode(descriptor, box.center, center);
+
+    if (mode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
+        const renderer::scene_contract::Vec3f cornerPoint {
+            center.x + box.width * 0.5F,
+            center.y + box.height * 0.5F,
+            center.z + box.depth * 0.5F
+        };
+        box.cornerPoint = ensurePointNode(descriptor, box.cornerPoint, cornerPoint);
+    } else if (box.constructionMode
+        == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
+        const auto cornerPoint = resolvePointNode(
+            descriptor,
+            box.cornerPoint,
+            {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
+        box.width = std::abs((cornerPoint.x - center.x) * 2.0F);
+        box.height = std::abs((cornerPoint.y - center.y) * 2.0F);
+        box.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    }
+
+    box.constructionMode = mode;
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
 void ViewerWindow::Viewport::setBoxWidth(float width) {
     const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
     if (objectIndex < 0) {
@@ -1117,6 +1305,102 @@ void ViewerWindow::Viewport::setBoxDepth(float depth) {
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
+void ViewerWindow::Viewport::setBoxCenter(const renderer::scene_contract::Vec3f& center) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
+    auto& box = primitive->box;
+    box.center = ensurePointNode(descriptor, box.center, center);
+    if (auto* centerNode = findPointNodeById(descriptor, box.center.id); centerNode != nullptr) {
+        centerNode->point.position = center;
+    }
+
+    if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
+        const auto cornerPoint = resolvePointNode(
+            descriptor,
+            box.cornerPoint,
+            {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
+        box.width = std::abs((cornerPoint.x - center.x) * 2.0F);
+        box.height = std::abs((cornerPoint.y - center.y) * 2.0F);
+        box.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    }
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setBoxCornerPoint(const renderer::scene_contract::Vec3f& cornerPoint) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
+    auto& box = primitive->box;
+    box.constructionMode = renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point;
+    const auto center = resolvePointNode(descriptor, box.center, {});
+    box.center = ensurePointNode(descriptor, box.center, center);
+    box.cornerPoint = ensurePointNode(descriptor, box.cornerPoint, cornerPoint);
+    if (auto* cornerNode = findPointNodeById(descriptor, box.cornerPoint.id); cornerNode != nullptr) {
+        cornerNode->point.position = cornerPoint;
+    }
+    box.width = std::abs((cornerPoint.x - center.x) * 2.0F);
+    box.height = std::abs((cornerPoint.y - center.y) * 2.0F);
+    box.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderConstructionMode(
+    renderer::parametric_model::CylinderSpec::ConstructionMode mode)
+{
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
+    auto& cylinder = primitive->cylinder;
+    const auto center = resolvePointNode(descriptor, cylinder.center, {});
+    cylinder.center = ensurePointNode(descriptor, cylinder.center, center);
+
+    if (mode == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
+        const renderer::scene_contract::Vec3f radiusPoint {
+            center.x + cylinder.radius,
+            center.y,
+            center.z
+        };
+        cylinder.radiusPoint = ensurePointNode(descriptor, cylinder.radiusPoint, radiusPoint);
+    } else if (cylinder.constructionMode
+        == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
+        const auto radiusPoint = resolvePointNode(
+            descriptor,
+            cylinder.radiusPoint,
+            {center.x + cylinder.radius, center.y, center.z});
+        cylinder.radius = radiusInCylinderPlane(radiusPoint, center);
+    }
+
+    cylinder.constructionMode = mode;
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
 void ViewerWindow::Viewport::setCylinderRadius(float radius) {
     const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
     if (objectIndex < 0) {
@@ -1162,6 +1446,62 @@ void ViewerWindow::Viewport::setCylinderSegments(std::uint32_t segments) {
     }
 
     primitive->cylinder.segments = segments;
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderCenter(const renderer::scene_contract::Vec3f& center) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
+    auto& cylinder = primitive->cylinder;
+    cylinder.center = ensurePointNode(descriptor, cylinder.center, center);
+    if (auto* centerNode = findPointNodeById(descriptor, cylinder.center.id); centerNode != nullptr) {
+        centerNode->point.position = center;
+    }
+
+    if (cylinder.constructionMode
+        == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
+        const auto radiusPoint = resolvePointNode(
+            descriptor,
+            cylinder.radiusPoint,
+            {center.x + cylinder.radius, center.y, center.z});
+        cylinder.radius = radiusInCylinderPlane(radiusPoint, center);
+    }
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderRadiusPoint(const renderer::scene_contract::Vec3f& radiusPoint) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
+    auto& cylinder = primitive->cylinder;
+    cylinder.constructionMode =
+        renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height;
+    const auto center = resolvePointNode(descriptor, cylinder.center, {});
+    cylinder.center = ensurePointNode(descriptor, cylinder.center, center);
+    cylinder.radiusPoint = ensurePointNode(descriptor, cylinder.radiusPoint, radiusPoint);
+    if (auto* radiusNode = findPointNodeById(descriptor, cylinder.radiusPoint.id); radiusNode != nullptr) {
+        radiusNode->point.position = radiusPoint;
+    }
+    cylinder.radius = radiusInCylinderPlane(radiusPoint, center);
+
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
@@ -1305,6 +1645,21 @@ void ViewerWindow::Viewport::setSphereSurfacePoint(const renderer::scene_contrac
         renderer::scene_contract::math::subtract(surfacePoint, center));
 
     applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setParametricOverlayModelBoundsVisible(bool visible) {
+    showParametricModelBounds_ = visible;
+    update();
+}
+
+void ViewerWindow::Viewport::setParametricOverlayNodePointsVisible(bool visible) {
+    showParametricNodePoints_ = visible;
+    update();
+}
+
+void ViewerWindow::Viewport::setParametricOverlayConstructionLinksVisible(bool visible) {
+    showParametricConstructionLinks_ = visible;
+    update();
 }
 
 void ViewerWindow::Viewport::setObjectMirrorEnabled(int index, bool enabled) {
@@ -1716,6 +2071,22 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
                 usage.semantic
             });
         }
+
+        const auto constructionLinks =
+            renderer::parametric_model::ParametricModelStructure::describeConstructionLinks(descriptor);
+        objectState.constructionLinks.clear();
+        objectState.constructionLinks.reserve(constructionLinks.size());
+        for (const auto& link : constructionLinks) {
+            objectState.constructionLinks.push_back({
+                link.unitId,
+                link.featureId,
+                link.constructionKind,
+                link.startNodeId,
+                link.endNodeId,
+                link.startSemantic,
+                link.endSemantic
+            });
+        }
     }
 
     state.lighting.ambientStrength = ambientStrength();
@@ -1921,6 +2292,8 @@ void ViewerWindow::Viewport::paintGL() {
         GL_COLOR_BUFFER_BIT,
         GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+
+    paintParametricOverlay();
 }
 
 void ViewerWindow::Viewport::mousePressEvent(QMouseEvent* event) {
@@ -2551,6 +2924,156 @@ renderer::scene_contract::Aabb ViewerWindow::Viewport::objectFocusBounds(int ind
     }
 
     return camera_focus_bounds::makeStableFocusBounds(localBounds, currentObjectTransform(index));
+}
+
+void ViewerWindow::Viewport::paintParametricOverlay() {
+    if (!showParametricModelBounds_ && !showParametricNodePoints_ && !showParametricConstructionLinks_) {
+        return;
+    }
+
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(sceneObjects_.size())) {
+        return;
+    }
+
+    const auto& sceneObject = sceneObjects_[objectIndex];
+    if (!sceneObject.visible) {
+        return;
+    }
+
+    const auto camera = cameraController_.buildCameraData();
+    const auto transform = currentObjectTransform(objectIndex);
+    const auto nodeUsages = renderer::parametric_model::ParametricModelStructure::describeNodeUsages(
+        sceneObject.parametricObjectDescriptor);
+    const auto constructionLinks = renderer::parametric_model::ParametricModelStructure::describeConstructionLinks(
+        sceneObject.parametricObjectDescriptor);
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    if (showParametricModelBounds_) {
+        paintParametricBoundsOverlay(painter, camera, sceneObject, transform);
+    }
+
+    if (showParametricConstructionLinks_) {
+        paintParametricConstructionLinksOverlay(painter, camera, sceneObject, transform, constructionLinks);
+    }
+
+    if (showParametricNodePoints_) {
+        paintParametricNodePointsOverlay(painter, camera, sceneObject, transform, nodeUsages);
+    }
+}
+
+void ViewerWindow::Viewport::paintParametricBoundsOverlay(
+    QPainter& painter,
+    const renderer::scene_contract::CameraData& camera,
+    const SceneObject& sceneObject,
+    const renderer::scene_contract::TransformData& transform) const
+{
+    const auto bounds = sceneObject.meshData.localBounds;
+    if (!bounds.valid) {
+        return;
+    }
+
+    const std::array<renderer::scene_contract::Vec3f, 8> localCorners = {{
+        {bounds.min.x, bounds.min.y, bounds.min.z},
+        {bounds.max.x, bounds.min.y, bounds.min.z},
+        {bounds.max.x, bounds.max.y, bounds.min.z},
+        {bounds.min.x, bounds.max.y, bounds.min.z},
+        {bounds.min.x, bounds.min.y, bounds.max.z},
+        {bounds.max.x, bounds.min.y, bounds.max.z},
+        {bounds.max.x, bounds.max.y, bounds.max.z},
+        {bounds.min.x, bounds.max.y, bounds.max.z}
+    }};
+    std::array<renderer::scene_contract::Vec3f, 8> worldCorners {};
+    for (std::size_t cornerIndex = 0; cornerIndex < localCorners.size(); ++cornerIndex) {
+        worldCorners[cornerIndex] = transformPoint(transform.world, localCorners[cornerIndex]);
+    }
+    const std::array<std::array<int, 2>, 12> edges = {{
+        {{0, 1}}, {{1, 2}}, {{2, 3}}, {{3, 0}},
+        {{4, 5}}, {{5, 6}}, {{6, 7}}, {{7, 4}},
+        {{0, 4}}, {{1, 5}}, {{2, 6}}, {{3, 7}}
+    }};
+
+    painter.setPen(QPen(QColor(255, 218, 88, 210), 1.5));
+    for (const auto& edge : edges) {
+        const auto start = projectWorldPoint(camera, width(), height(), worldCorners[edge[0]]);
+        const auto end = projectWorldPoint(camera, width(), height(), worldCorners[edge[1]]);
+        if (start.visible && end.visible) {
+            painter.drawLine(start.screen, end.screen);
+        }
+    }
+}
+
+void ViewerWindow::Viewport::paintParametricConstructionLinksOverlay(
+    QPainter& painter,
+    const renderer::scene_contract::CameraData& camera,
+    const SceneObject& sceneObject,
+    const renderer::scene_contract::TransformData& transform,
+    const std::vector<renderer::parametric_model::ParametricConstructionLinkDescriptor>& links) const
+{
+    painter.setPen(QPen(QColor(106, 208, 255, 190), 1.25));
+    for (const auto& link : links) {
+        const auto* startNode = findPointNodeById(sceneObject.parametricObjectDescriptor, link.startNodeId);
+        const auto* endNode = findPointNodeById(sceneObject.parametricObjectDescriptor, link.endNodeId);
+        if (startNode == nullptr || endNode == nullptr) {
+            continue;
+        }
+
+        const auto start = projectWorldPoint(
+            camera,
+            width(),
+            height(),
+            transformPoint(transform.world, startNode->point.position));
+        const auto end = projectWorldPoint(
+            camera,
+            width(),
+            height(),
+            transformPoint(transform.world, endNode->point.position));
+        if (!start.visible || !end.visible) {
+            continue;
+        }
+
+        painter.drawLine(start.screen, end.screen);
+        painter.drawText(
+            (start.screen + end.screen) * 0.5 + QPointF(6.0F, -6.0F),
+            QStringLiteral("unit:%1 %2").arg(link.unitId).arg(overlaySemanticLabel(link.endSemantic)));
+    }
+}
+
+void ViewerWindow::Viewport::paintParametricNodePointsOverlay(
+    QPainter& painter,
+    const renderer::scene_contract::CameraData& camera,
+    const SceneObject& sceneObject,
+    const renderer::scene_contract::TransformData& transform,
+    const std::vector<renderer::parametric_model::ParametricNodeUsageDescriptor>& nodeUsages) const
+{
+    painter.setPen(QPen(QColor(20, 24, 28, 220), 1.5));
+    for (const auto& node : sceneObject.parametricObjectDescriptor.nodes) {
+        if (node.kind != renderer::parametric_model::ParametricNodeKind::point) {
+            continue;
+        }
+        const auto* usage = firstUsageForNode(nodeUsages, node.id);
+        const auto semantic = usage != nullptr
+            ? usage->semantic
+            : renderer::parametric_model::ParametricInputSemantic::center;
+
+        const auto projected = projectWorldPoint(
+            camera,
+            width(),
+            height(),
+            transformPoint(transform.world, node.point.position));
+        if (!projected.visible) {
+            continue;
+        }
+
+        constexpr float kNodeMarkerRadius = 5.0F;
+        painter.setBrush(overlayNodeColor(semantic));
+        painter.drawEllipse(projected.screen, kNodeMarkerRadius, kNodeMarkerRadius);
+        painter.drawText(
+            projected.screen + QPointF(kNodeMarkerRadius + 3.0F, -kNodeMarkerRadius - 3.0F),
+            QStringLiteral("%1:%2").arg(node.id).arg(overlaySemanticLabel(semantic)));
+    }
 }
 
 void ViewerWindow::Viewport::rebuildFramePacket() {

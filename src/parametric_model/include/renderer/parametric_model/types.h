@@ -41,6 +41,12 @@ struct BoxSpec {
     float height = 1.0F;
     float depth = 1.0F;
     NodeReference center {};
+    NodeReference cornerPoint {};
+    enum class ConstructionMode : std::uint8_t {
+        center_size,
+        center_corner_point
+    };
+    ConstructionMode constructionMode = ConstructionMode::center_size;
 };
 
 struct CylinderSpec {
@@ -48,6 +54,12 @@ struct CylinderSpec {
     float height = 1.0F;
     std::uint32_t segments = 24U;
     NodeReference center {};
+    NodeReference radiusPoint {};
+    enum class ConstructionMode : std::uint8_t {
+        center_radius_height,
+        center_radius_point_height
+    };
+    ConstructionMode constructionMode = ConstructionMode::center_radius_height;
 };
 
 struct SphereSpec {
@@ -105,7 +117,9 @@ enum class ParametricUnitRole : std::uint8_t {
 
 enum class ParametricConstructionKind : std::uint8_t {
     box_center_size,
+    box_center_corner_point,
     cylinder_center_radius_height,
+    cylinder_center_radius_point_height,
     sphere_center_radius,
     sphere_center_surface_point,
     mirror_axis_plane,
@@ -123,6 +137,8 @@ enum class ParametricInputKind : std::uint8_t {
 enum class ParametricInputSemantic : std::uint8_t {
     center,
     surface_point,
+    corner_point,
+    radius_point,
     width,
     height,
     depth,
@@ -180,6 +196,16 @@ struct ParametricNodeUsageDescriptor {
     ParametricUnitId unitId = 0U;
     ParametricFeatureId featureId = 0U;
     ParametricInputSemantic semantic = ParametricInputSemantic::center;
+};
+
+struct ParametricConstructionLinkDescriptor {
+    ParametricUnitId unitId = 0U;
+    ParametricFeatureId featureId = 0U;
+    ParametricConstructionKind constructionKind = ParametricConstructionKind::box_center_size;
+    ParametricNodeId startNodeId = 0U;
+    ParametricNodeId endNodeId = 0U;
+    ParametricInputSemantic startSemantic = ParametricInputSemantic::center;
+    ParametricInputSemantic endSemantic = ParametricInputSemantic::surface_point;
 };
 
 }  // namespace renderer::parametric_model
