@@ -19,6 +19,7 @@
 #include <QWidget>
 
 #include "camera_focus_bounds_utils.h"
+#include "renderer/parametric_model/construction_schema.h"
 #include "renderer/scene_contract/math_utils.h"
 #include "renderer/parametric_model/model_structure.h"
 #include "renderer/parametric_model/parametric_evaluator.h"
@@ -387,52 +388,7 @@ const renderer::parametric_model::ParametricNodeUsageDescriptor* firstUsageForNo
 }
 
 const char* overlaySemanticLabel(renderer::parametric_model::ParametricInputSemantic semantic) {
-    switch (semantic) {
-    case renderer::parametric_model::ParametricInputSemantic::center:
-        return "center";
-    case renderer::parametric_model::ParametricInputSemantic::surface_point:
-        return "surface";
-    case renderer::parametric_model::ParametricInputSemantic::corner_point:
-        return "corner";
-    case renderer::parametric_model::ParametricInputSemantic::corner_start:
-        return "corner start";
-    case renderer::parametric_model::ParametricInputSemantic::corner_end:
-        return "corner end";
-    case renderer::parametric_model::ParametricInputSemantic::radius_point:
-        return "radius point";
-    case renderer::parametric_model::ParametricInputSemantic::axis_start:
-        return "axis start";
-    case renderer::parametric_model::ParametricInputSemantic::axis_end:
-        return "axis end";
-    case renderer::parametric_model::ParametricInputSemantic::diameter_start:
-        return "diameter start";
-    case renderer::parametric_model::ParametricInputSemantic::diameter_end:
-        return "diameter end";
-    case renderer::parametric_model::ParametricInputSemantic::width:
-        return "width";
-    case renderer::parametric_model::ParametricInputSemantic::height:
-        return "height";
-    case renderer::parametric_model::ParametricInputSemantic::depth:
-        return "depth";
-    case renderer::parametric_model::ParametricInputSemantic::radius:
-        return "radius";
-    case renderer::parametric_model::ParametricInputSemantic::slices:
-        return "slices";
-    case renderer::parametric_model::ParametricInputSemantic::stacks:
-        return "stacks";
-    case renderer::parametric_model::ParametricInputSemantic::segments:
-        return "segments";
-    case renderer::parametric_model::ParametricInputSemantic::axis:
-        return "axis";
-    case renderer::parametric_model::ParametricInputSemantic::plane_offset:
-        return "plane";
-    case renderer::parametric_model::ParametricInputSemantic::count:
-        return "count";
-    case renderer::parametric_model::ParametricInputSemantic::offset:
-        return "offset";
-    }
-
-    return "input";
+    return renderer::parametric_model::ParametricConstructionSchema::inputSemanticOverlayLabel(semantic).data();
 }
 
 QColor overlayNodeColor(renderer::parametric_model::ParametricInputSemantic semantic) {

@@ -1,6 +1,9 @@
 #include "viewer_control_panel.h"
 
+#include "renderer/parametric_model/construction_schema.h"
+
 #include <algorithm>
+#include <string_view>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -131,33 +134,12 @@ QString unitEvaluationStatusText(renderer::parametric_model::ParametricUnitEvalu
     return QStringLiteral("unknown");
 }
 
-QString constructionKindText(renderer::parametric_model::ParametricConstructionKind kind) {
-    switch (kind) {
-    case renderer::parametric_model::ParametricConstructionKind::box_center_size:
-        return QStringLiteral("Box: center + size");
-    case renderer::parametric_model::ParametricConstructionKind::box_center_corner_point:
-        return QStringLiteral("Box: center + corner point");
-    case renderer::parametric_model::ParametricConstructionKind::box_corner_points:
-        return QStringLiteral("Box: two corner points");
-    case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_height:
-        return QStringLiteral("Cylinder: center + radius + height");
-    case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_point_height:
-        return QStringLiteral("Cylinder: center + radius point + height");
-    case renderer::parametric_model::ParametricConstructionKind::cylinder_axis_endpoints_radius:
-        return QStringLiteral("Cylinder: axis endpoints + radius");
-    case renderer::parametric_model::ParametricConstructionKind::sphere_center_radius:
-        return QStringLiteral("Sphere: center + radius");
-    case renderer::parametric_model::ParametricConstructionKind::sphere_center_surface_point:
-        return QStringLiteral("Sphere: center + surface point");
-    case renderer::parametric_model::ParametricConstructionKind::sphere_diameter_points:
-        return QStringLiteral("Sphere: diameter points");
-    case renderer::parametric_model::ParametricConstructionKind::mirror_axis_plane:
-        return QStringLiteral("Mirror: axis + plane");
-    case renderer::parametric_model::ParametricConstructionKind::linear_array_count_offset:
-        return QStringLiteral("Linear Array: count + offset");
-    }
+QString schemaText(std::string_view text) {
+    return QString::fromUtf8(text.data(), static_cast<int>(text.size()));
+}
 
-    return QStringLiteral("Unknown");
+QString constructionKindText(renderer::parametric_model::ParametricConstructionKind kind) {
+    return schemaText(renderer::parametric_model::ParametricConstructionSchema::constructionLabel(kind));
 }
 
 QString inputKindText(renderer::parametric_model::ParametricInputKind kind) {
@@ -178,52 +160,7 @@ QString inputKindText(renderer::parametric_model::ParametricInputKind kind) {
 }
 
 QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic semantic) {
-    switch (semantic) {
-    case renderer::parametric_model::ParametricInputSemantic::center:
-        return QStringLiteral("center");
-    case renderer::parametric_model::ParametricInputSemantic::surface_point:
-        return QStringLiteral("surface point");
-    case renderer::parametric_model::ParametricInputSemantic::corner_point:
-        return QStringLiteral("corner point");
-    case renderer::parametric_model::ParametricInputSemantic::corner_start:
-        return QStringLiteral("corner start");
-    case renderer::parametric_model::ParametricInputSemantic::corner_end:
-        return QStringLiteral("corner end");
-    case renderer::parametric_model::ParametricInputSemantic::radius_point:
-        return QStringLiteral("radius point");
-    case renderer::parametric_model::ParametricInputSemantic::axis_start:
-        return QStringLiteral("axis start");
-    case renderer::parametric_model::ParametricInputSemantic::axis_end:
-        return QStringLiteral("axis end");
-    case renderer::parametric_model::ParametricInputSemantic::diameter_start:
-        return QStringLiteral("diameter start");
-    case renderer::parametric_model::ParametricInputSemantic::diameter_end:
-        return QStringLiteral("diameter end");
-    case renderer::parametric_model::ParametricInputSemantic::width:
-        return QStringLiteral("width");
-    case renderer::parametric_model::ParametricInputSemantic::height:
-        return QStringLiteral("height");
-    case renderer::parametric_model::ParametricInputSemantic::depth:
-        return QStringLiteral("depth");
-    case renderer::parametric_model::ParametricInputSemantic::radius:
-        return QStringLiteral("radius");
-    case renderer::parametric_model::ParametricInputSemantic::slices:
-        return QStringLiteral("slices");
-    case renderer::parametric_model::ParametricInputSemantic::stacks:
-        return QStringLiteral("stacks");
-    case renderer::parametric_model::ParametricInputSemantic::segments:
-        return QStringLiteral("segments");
-    case renderer::parametric_model::ParametricInputSemantic::axis:
-        return QStringLiteral("axis");
-    case renderer::parametric_model::ParametricInputSemantic::plane_offset:
-        return QStringLiteral("plane offset");
-    case renderer::parametric_model::ParametricInputSemantic::count:
-        return QStringLiteral("count");
-    case renderer::parametric_model::ParametricInputSemantic::offset:
-        return QStringLiteral("offset");
-    }
-
-    return QStringLiteral("unknown");
+    return schemaText(renderer::parametric_model::ParametricConstructionSchema::inputSemanticLabel(semantic));
 }
 
 QString nodeKindText(renderer::parametric_model::ParametricNodeKind kind) {

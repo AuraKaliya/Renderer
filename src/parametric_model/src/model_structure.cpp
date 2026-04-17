@@ -1,5 +1,7 @@
 #include "renderer/parametric_model/model_structure.h"
 
+#include "renderer/parametric_model/construction_schema.h"
+
 #include <cmath>
 
 namespace renderer::parametric_model {
@@ -46,35 +48,10 @@ void appendConstructionLink(
     const FeatureDescriptor& feature,
     const std::vector<ParametricUnitInputDescriptor>& inputs,
     ParametricConstructionKind constructionKind,
-    ParametricInputSemantic endSemantic)
+    const ParametricConstructionLinkTemplate& linkTemplate)
 {
-    const auto* centerInput = findNodeInput(inputs, feature.id, ParametricInputSemantic::center);
-    const auto* endInput = findNodeInput(inputs, feature.id, endSemantic);
-    if (centerInput == nullptr || endInput == nullptr) {
-        return;
-    }
-
-    ParametricConstructionLinkDescriptor link;
-    link.unitId = effectiveUnitId(feature);
-    link.featureId = feature.id;
-    link.constructionKind = constructionKind;
-    link.startNodeId = centerInput->nodeId;
-    link.endNodeId = endInput->nodeId;
-    link.startSemantic = centerInput->semantic;
-    link.endSemantic = endInput->semantic;
-    links.push_back(link);
-}
-
-void appendConstructionLinkBySemantics(
-    std::vector<ParametricConstructionLinkDescriptor>& links,
-    const FeatureDescriptor& feature,
-    const std::vector<ParametricUnitInputDescriptor>& inputs,
-    ParametricConstructionKind constructionKind,
-    ParametricInputSemantic startSemantic,
-    ParametricInputSemantic endSemantic)
-{
-    const auto* startInput = findNodeInput(inputs, feature.id, startSemantic);
-    const auto* endInput = findNodeInput(inputs, feature.id, endSemantic);
+    const auto* startInput = findNodeInput(inputs, feature.id, linkTemplate.startSemantic);
+    const auto* endInput = findNodeInput(inputs, feature.id, linkTemplate.endSemantic);
     if (startInput == nullptr || endInput == nullptr) {
         return;
     }
@@ -88,6 +65,59 @@ void appendConstructionLinkBySemantics(
     link.startSemantic = startInput->semantic;
     link.endSemantic = endInput->semantic;
     links.push_back(link);
+}
+
+ParametricNodeId nodeIdForInput(
+    const FeatureDescriptor& feature,
+    ParametricInputSemantic semantic)
+{
+    if (feature.kind != FeatureKind::primitive) {
+        return 0U;
+    }
+
+    switch (feature.primitive.kind) {
+    case PrimitiveKind::box:
+        switch (semantic) {
+        case ParametricInputSemantic::center:
+            return feature.primitive.box.center.id;
+        case ParametricInputSemantic::corner_point:
+            return feature.primitive.box.cornerPoint.id;
+        case ParametricInputSemantic::corner_start:
+            return feature.primitive.box.cornerStart.id;
+        case ParametricInputSemantic::corner_end:
+            return feature.primitive.box.cornerEnd.id;
+        default:
+            return 0U;
+        }
+    case PrimitiveKind::cylinder:
+        switch (semantic) {
+        case ParametricInputSemantic::center:
+            return feature.primitive.cylinder.center.id;
+        case ParametricInputSemantic::radius_point:
+            return feature.primitive.cylinder.radiusPoint.id;
+        case ParametricInputSemantic::axis_start:
+            return feature.primitive.cylinder.axisStart.id;
+        case ParametricInputSemantic::axis_end:
+            return feature.primitive.cylinder.axisEnd.id;
+        default:
+            return 0U;
+        }
+    case PrimitiveKind::sphere:
+        switch (semantic) {
+        case ParametricInputSemantic::center:
+            return feature.primitive.sphere.center.id;
+        case ParametricInputSemantic::surface_point:
+            return feature.primitive.sphere.surfacePoint.id;
+        case ParametricInputSemantic::diameter_start:
+            return feature.primitive.sphere.diameterStart.id;
+        case ParametricInputSemantic::diameter_end:
+            return feature.primitive.sphere.diameterEnd.id;
+        default:
+            return 0U;
+        }
+    }
+
+    return 0U;
 }
 
 const ParametricNodeDescriptor* findPointNode(
@@ -257,79 +287,17 @@ std::vector<ParametricUnitInputDescriptor> ParametricModelStructure::describeUni
     std::vector<ParametricUnitInputDescriptor> inputs;
 
     for (const auto& feature : descriptor.features) {
-        switch (feature.kind) {
-        case FeatureKind::primitive:
-            switch (feature.primitive.kind) {
-            case PrimitiveKind::box:
-                if (feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::corner_points) {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::corner_start, feature.primitive.box.cornerStart.id);
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::corner_end, feature.primitive.box.cornerEnd.id);
-                } else if (feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::center_corner_point) {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.box.center.id);
-                    appendInput(
-                        inputs,
-                        feature,
-                        ParametricInputKind::node,
-                        ParametricInputSemantic::corner_point,
-                        feature.primitive.box.cornerPoint.id);
-                } else {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.box.center.id);
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::width);
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::height);
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::depth);
-                }
-                break;
-            case PrimitiveKind::cylinder:
-                if (feature.primitive.cylinder.constructionMode
-                    == CylinderSpec::ConstructionMode::axis_endpoints_radius) {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::axis_start, feature.primitive.cylinder.axisStart.id);
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::axis_end, feature.primitive.cylinder.axisEnd.id);
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
-                } else {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.cylinder.center.id);
-                    if (feature.primitive.cylinder.constructionMode
-                        == CylinderSpec::ConstructionMode::center_radius_point_height) {
-                        appendInput(
-                            inputs,
-                            feature,
-                            ParametricInputKind::node,
-                            ParametricInputSemantic::radius_point,
-                            feature.primitive.cylinder.radiusPoint.id);
-                    } else {
-                        appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
-                    }
-                    appendInput(
-                        inputs,
-                        feature,
-                        ParametricInputKind::float_value,
-                        ParametricInputSemantic::height);
-                }
-                appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::segments);
-                break;
-            case PrimitiveKind::sphere:
-                if (feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::diameter_points) {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::diameter_start, feature.primitive.sphere.diameterStart.id);
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::diameter_end, feature.primitive.sphere.diameterEnd.id);
-                } else if (feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::center_surface_point) {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.sphere.center.id);
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::surface_point, feature.primitive.sphere.surfacePoint.id);
-                } else {
-                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.sphere.center.id);
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
-                }
-                appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::slices);
-                appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::stacks);
-                break;
-            }
-            break;
-        case FeatureKind::mirror:
-            appendInput(inputs, feature, ParametricInputKind::enum_value, ParametricInputSemantic::axis);
-            appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::plane_offset);
-            break;
-        case FeatureKind::linear_array:
-            appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::count);
-            appendInput(inputs, feature, ParametricInputKind::vector3, ParametricInputSemantic::offset);
-            break;
+        const auto constructionKind = constructionKindForFeature(feature);
+        const auto inputTemplates = ParametricConstructionSchema::inputTemplates(constructionKind);
+        for (const auto& inputTemplate : inputTemplates) {
+            appendInput(
+                inputs,
+                feature,
+                inputTemplate.kind,
+                inputTemplate.semantic,
+                inputTemplate.kind == ParametricInputKind::node
+                    ? nodeIdForInput(feature, inputTemplate.semantic)
+                    : 0U);
         }
     }
 
@@ -370,64 +338,9 @@ std::vector<ParametricConstructionLinkDescriptor> ParametricModelStructure::desc
         }
 
         const auto constructionKind = constructionKindForFeature(feature);
-        switch (constructionKind) {
-        case ParametricConstructionKind::box_center_corner_point:
-            appendConstructionLink(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::corner_point);
-            break;
-        case ParametricConstructionKind::box_corner_points:
-            appendConstructionLinkBySemantics(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::corner_start,
-                ParametricInputSemantic::corner_end);
-            break;
-        case ParametricConstructionKind::cylinder_center_radius_point_height:
-            appendConstructionLink(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::radius_point);
-            break;
-        case ParametricConstructionKind::cylinder_axis_endpoints_radius:
-            appendConstructionLinkBySemantics(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::axis_start,
-                ParametricInputSemantic::axis_end);
-            break;
-        case ParametricConstructionKind::sphere_center_surface_point:
-            appendConstructionLink(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::surface_point);
-            break;
-        case ParametricConstructionKind::sphere_diameter_points:
-            appendConstructionLinkBySemantics(
-                links,
-                feature,
-                inputs,
-                constructionKind,
-                ParametricInputSemantic::diameter_start,
-                ParametricInputSemantic::diameter_end);
-            break;
-        case ParametricConstructionKind::box_center_size:
-        case ParametricConstructionKind::cylinder_center_radius_height:
-        case ParametricConstructionKind::sphere_center_radius:
-        case ParametricConstructionKind::mirror_axis_plane:
-        case ParametricConstructionKind::linear_array_count_offset:
-            break;
+        const auto linkTemplate = ParametricConstructionSchema::constructionLink(constructionKind);
+        if (linkTemplate.has_value()) {
+            appendConstructionLink(links, feature, inputs, constructionKind, *linkTemplate);
         }
     }
 
