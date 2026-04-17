@@ -196,6 +196,17 @@ float radiusInCylinderPlane(
     return std::sqrt(dx * dx + dz * dz);
 }
 
+renderer::scene_contract::Vec3f midpoint(
+    const renderer::scene_contract::Vec3f& left,
+    const renderer::scene_contract::Vec3f& right)
+{
+    return {
+        (left.x + right.x) * 0.5F,
+        (left.y + right.y) * 0.5F,
+        (left.z + right.z) * 0.5F
+    };
+}
+
 const std::array<renderer::parametric_model::ParametricObjectDescriptor, kDefaultSceneObjectCount> kDefaultParametricObjects = {{
     makeDefaultParametricObject({
         renderer::parametric_model::PrimitiveKind::box,
@@ -383,8 +394,20 @@ const char* overlaySemanticLabel(renderer::parametric_model::ParametricInputSema
         return "surface";
     case renderer::parametric_model::ParametricInputSemantic::corner_point:
         return "corner";
+    case renderer::parametric_model::ParametricInputSemantic::corner_start:
+        return "corner start";
+    case renderer::parametric_model::ParametricInputSemantic::corner_end:
+        return "corner end";
     case renderer::parametric_model::ParametricInputSemantic::radius_point:
         return "radius point";
+    case renderer::parametric_model::ParametricInputSemantic::axis_start:
+        return "axis start";
+    case renderer::parametric_model::ParametricInputSemantic::axis_end:
+        return "axis end";
+    case renderer::parametric_model::ParametricInputSemantic::diameter_start:
+        return "diameter start";
+    case renderer::parametric_model::ParametricInputSemantic::diameter_end:
+        return "diameter end";
     case renderer::parametric_model::ParametricInputSemantic::width:
         return "width";
     case renderer::parametric_model::ParametricInputSemantic::height:
@@ -420,11 +443,42 @@ QColor overlayNodeColor(renderer::parametric_model::ParametricInputSemantic sema
         return QColor(106, 208, 255, 230);
     case renderer::parametric_model::ParametricInputSemantic::corner_point:
         return QColor(255, 176, 92, 230);
+    case renderer::parametric_model::ParametricInputSemantic::corner_start:
+        return QColor(255, 176, 92, 230);
+    case renderer::parametric_model::ParametricInputSemantic::corner_end:
+        return QColor(255, 126, 126, 230);
     case renderer::parametric_model::ParametricInputSemantic::radius_point:
         return QColor(255, 143, 190, 230);
+    case renderer::parametric_model::ParametricInputSemantic::axis_start:
+        return QColor(117, 206, 154, 230);
+    case renderer::parametric_model::ParametricInputSemantic::axis_end:
+        return QColor(106, 208, 255, 230);
+    case renderer::parametric_model::ParametricInputSemantic::diameter_start:
+        return QColor(255, 176, 92, 230);
+    case renderer::parametric_model::ParametricInputSemantic::diameter_end:
+        return QColor(255, 126, 126, 230);
     default:
         return QColor(220, 220, 220, 225);
     }
+}
+
+void pruneUnreferencedParametricNodes(
+    renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    const auto usages = renderer::parametric_model::ParametricModelStructure::describeNodeUsages(descriptor);
+    descriptor.nodes.erase(
+        std::remove_if(
+            descriptor.nodes.begin(),
+            descriptor.nodes.end(),
+            [&usages](const renderer::parametric_model::ParametricNodeDescriptor& node) {
+                return std::none_of(
+                    usages.begin(),
+                    usages.end(),
+                    [&node](const renderer::parametric_model::ParametricNodeUsageDescriptor& usage) {
+                        return usage.nodeId == node.id;
+                    });
+            }),
+        descriptor.nodes.end());
 }
 
 ViewportRay makeViewportRay(
@@ -851,6 +905,12 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::boxCornerPointChanged, this, [this](float x, float y, float z) {
         viewport_->setBoxCornerPoint({x, y, z});
     });
+    connect(controlPanel_, &ViewerControlPanel::boxCornerStartChanged, this, [this](float x, float y, float z) {
+        viewport_->setBoxCornerStart({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::boxCornerEndChanged, this, [this](float x, float y, float z) {
+        viewport_->setBoxCornerEnd({x, y, z});
+    });
     connect(controlPanel_, &ViewerControlPanel::cylinderConstructionModeChanged, this, [this](int mode) {
         viewport_->setCylinderConstructionMode(
             static_cast<renderer::parametric_model::CylinderSpec::ConstructionMode>(mode));
@@ -870,6 +930,12 @@ void ViewerWindow::bindControlPanelSignals() {
     connect(controlPanel_, &ViewerControlPanel::cylinderRadiusPointChanged, this, [this](float x, float y, float z) {
         viewport_->setCylinderRadiusPoint({x, y, z});
     });
+    connect(controlPanel_, &ViewerControlPanel::cylinderAxisStartChanged, this, [this](float x, float y, float z) {
+        viewport_->setCylinderAxisStart({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::cylinderAxisEndChanged, this, [this](float x, float y, float z) {
+        viewport_->setCylinderAxisEnd({x, y, z});
+    });
     connect(controlPanel_, &ViewerControlPanel::sphereRadiusChanged, this, [this](float radius) {
         viewport_->setSphereRadius(radius);
     });
@@ -888,6 +954,12 @@ void ViewerWindow::bindControlPanelSignals() {
     });
     connect(controlPanel_, &ViewerControlPanel::sphereSurfacePointChanged, this, [this](float x, float y, float z) {
         viewport_->setSphereSurfacePoint({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereDiameterStartChanged, this, [this](float x, float y, float z) {
+        viewport_->setSphereDiameterStart({x, y, z});
+    });
+    connect(controlPanel_, &ViewerControlPanel::sphereDiameterEndChanged, this, [this](float x, float y, float z) {
+        viewport_->setSphereDiameterEnd({x, y, z});
     });
     connect(controlPanel_, &ViewerControlPanel::parametricOverlayModelBoundsChanged, this, [this](bool visible) {
         viewport_->setParametricOverlayModelBoundsVisible(visible);
@@ -1232,8 +1304,55 @@ void ViewerWindow::Viewport::setBoxConstructionMode(
     }
 
     auto& box = primitive->box;
-    const auto center = resolvePointNode(descriptor, box.center, {});
-    box.center = ensurePointNode(descriptor, box.center, center);
+    auto center = resolvePointNode(descriptor, box.center, {});
+    if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
+        const auto cornerPoint = resolvePointNode(
+            descriptor,
+            box.cornerPoint,
+            {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
+        box.width = std::abs((cornerPoint.x - center.x) * 2.0F);
+        box.height = std::abs((cornerPoint.y - center.y) * 2.0F);
+        box.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    } else if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::corner_points) {
+        const auto cornerStart = resolvePointNode(
+            descriptor,
+            box.cornerStart,
+            {center.x - box.width * 0.5F, center.y - box.height * 0.5F, center.z - box.depth * 0.5F});
+        const auto cornerEnd = resolvePointNode(
+            descriptor,
+            box.cornerEnd,
+            {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
+        center = midpoint(cornerStart, cornerEnd);
+        box.width = std::abs(cornerEnd.x - cornerStart.x);
+        box.height = std::abs(cornerEnd.y - cornerStart.y);
+        box.depth = std::abs(cornerEnd.z - cornerStart.z);
+    }
+
+    if (mode == renderer::parametric_model::BoxSpec::ConstructionMode::corner_points) {
+        const renderer::scene_contract::Vec3f cornerStart {
+            center.x - box.width * 0.5F,
+            center.y - box.height * 0.5F,
+            center.z - box.depth * 0.5F
+        };
+        const renderer::scene_contract::Vec3f cornerEnd {
+            center.x + box.width * 0.5F,
+            center.y + box.height * 0.5F,
+            center.z + box.depth * 0.5F
+        };
+        box.cornerStart = ensurePointNode(descriptor, box.cornerStart, cornerStart);
+        box.cornerEnd = ensurePointNode(descriptor, box.cornerEnd, cornerEnd);
+        if (auto* startNode = findPointNodeById(descriptor, box.cornerStart.id); startNode != nullptr) {
+            startNode->point.position = cornerStart;
+        }
+        if (auto* endNode = findPointNodeById(descriptor, box.cornerEnd.id); endNode != nullptr) {
+            endNode->point.position = cornerEnd;
+        }
+    } else {
+        box.center = ensurePointNode(descriptor, box.center, center);
+        if (auto* centerNode = findPointNodeById(descriptor, box.center.id); centerNode != nullptr) {
+            centerNode->point.position = center;
+        }
+    }
 
     if (mode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
         const renderer::scene_contract::Vec3f cornerPoint {
@@ -1242,15 +1361,9 @@ void ViewerWindow::Viewport::setBoxConstructionMode(
             center.z + box.depth * 0.5F
         };
         box.cornerPoint = ensurePointNode(descriptor, box.cornerPoint, cornerPoint);
-    } else if (box.constructionMode
-        == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
-        const auto cornerPoint = resolvePointNode(
-            descriptor,
-            box.cornerPoint,
-            {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
-        box.width = std::abs((cornerPoint.x - center.x) * 2.0F);
-        box.height = std::abs((cornerPoint.y - center.y) * 2.0F);
-        box.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+        if (auto* cornerNode = findPointNodeById(descriptor, box.cornerPoint.id); cornerNode != nullptr) {
+            cornerNode->point.position = cornerPoint;
+        }
     }
 
     box.constructionMode = mode;
@@ -1363,6 +1476,68 @@ void ViewerWindow::Viewport::setBoxCornerPoint(const renderer::scene_contract::V
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
+void ViewerWindow::Viewport::setBoxCornerStart(const renderer::scene_contract::Vec3f& cornerStart) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
+    auto& box = primitive->box;
+    box.constructionMode = renderer::parametric_model::BoxSpec::ConstructionMode::corner_points;
+    const auto center = resolvePointNode(descriptor, box.center, {});
+    const auto cornerEnd = resolvePointNode(
+        descriptor,
+        box.cornerEnd,
+        {center.x + box.width * 0.5F, center.y + box.height * 0.5F, center.z + box.depth * 0.5F});
+    box.cornerStart = ensurePointNode(descriptor, box.cornerStart, cornerStart);
+    box.cornerEnd = ensurePointNode(descriptor, box.cornerEnd, cornerEnd);
+    if (auto* startNode = findPointNodeById(descriptor, box.cornerStart.id); startNode != nullptr) {
+        startNode->point.position = cornerStart;
+    }
+    box.width = std::abs(cornerEnd.x - cornerStart.x);
+    box.height = std::abs(cornerEnd.y - cornerStart.y);
+    box.depth = std::abs(cornerEnd.z - cornerStart.z);
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setBoxCornerEnd(const renderer::scene_contract::Vec3f& cornerEnd) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::box) {
+        return;
+    }
+
+    auto& box = primitive->box;
+    box.constructionMode = renderer::parametric_model::BoxSpec::ConstructionMode::corner_points;
+    const auto center = resolvePointNode(descriptor, box.center, {});
+    const auto cornerStart = resolvePointNode(
+        descriptor,
+        box.cornerStart,
+        {center.x - box.width * 0.5F, center.y - box.height * 0.5F, center.z - box.depth * 0.5F});
+    box.cornerStart = ensurePointNode(descriptor, box.cornerStart, cornerStart);
+    box.cornerEnd = ensurePointNode(descriptor, box.cornerEnd, cornerEnd);
+    if (auto* endNode = findPointNodeById(descriptor, box.cornerEnd.id); endNode != nullptr) {
+        endNode->point.position = cornerEnd;
+    }
+    box.width = std::abs(cornerEnd.x - cornerStart.x);
+    box.height = std::abs(cornerEnd.y - cornerStart.y);
+    box.depth = std::abs(cornerEnd.z - cornerStart.z);
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
 void ViewerWindow::Viewport::setCylinderConstructionMode(
     renderer::parametric_model::CylinderSpec::ConstructionMode mode)
 {
@@ -1378,8 +1553,69 @@ void ViewerWindow::Viewport::setCylinderConstructionMode(
     }
 
     auto& cylinder = primitive->cylinder;
-    const auto center = resolvePointNode(descriptor, cylinder.center, {});
-    cylinder.center = ensurePointNode(descriptor, cylinder.center, center);
+    const bool wasAxisEndpoints =
+        cylinder.constructionMode
+        == renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius;
+    auto center = resolvePointNode(descriptor, cylinder.center, {});
+    renderer::scene_contract::Vec3f axisStart {
+        center.x,
+        center.y - cylinder.height * 0.5F,
+        center.z
+    };
+    renderer::scene_contract::Vec3f axisEnd {
+        center.x,
+        center.y + cylinder.height * 0.5F,
+        center.z
+    };
+    if (wasAxisEndpoints) {
+        axisStart = resolvePointNode(
+            descriptor,
+            cylinder.axisStart,
+            axisStart);
+        axisEnd = resolvePointNode(
+            descriptor,
+            cylinder.axisEnd,
+            axisEnd);
+        center = midpoint(axisStart, axisEnd);
+        cylinder.height = renderer::scene_contract::math::length(
+            renderer::scene_contract::math::subtract(axisEnd, axisStart));
+    } else if (cylinder.constructionMode
+        == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
+        const auto radiusPoint = resolvePointNode(
+            descriptor,
+            cylinder.radiusPoint,
+            {center.x + cylinder.radius, center.y, center.z});
+        cylinder.radius = radiusInCylinderPlane(radiusPoint, center);
+    }
+
+    if (!wasAxisEndpoints) {
+        axisStart = {
+            center.x,
+            center.y - cylinder.height * 0.5F,
+            center.z
+        };
+        axisEnd = {
+            center.x,
+            center.y + cylinder.height * 0.5F,
+            center.z
+        };
+    }
+
+    if (mode == renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius) {
+        cylinder.axisStart = ensurePointNode(descriptor, cylinder.axisStart, axisStart);
+        cylinder.axisEnd = ensurePointNode(descriptor, cylinder.axisEnd, axisEnd);
+        if (auto* startNode = findPointNodeById(descriptor, cylinder.axisStart.id); startNode != nullptr) {
+            startNode->point.position = axisStart;
+        }
+        if (auto* endNode = findPointNodeById(descriptor, cylinder.axisEnd.id); endNode != nullptr) {
+            endNode->point.position = axisEnd;
+        }
+    } else {
+        cylinder.center = ensurePointNode(descriptor, cylinder.center, center);
+        if (auto* centerNode = findPointNodeById(descriptor, cylinder.center.id); centerNode != nullptr) {
+            centerNode->point.position = center;
+        }
+    }
 
     if (mode == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
         const renderer::scene_contract::Vec3f radiusPoint {
@@ -1388,13 +1624,9 @@ void ViewerWindow::Viewport::setCylinderConstructionMode(
             center.z
         };
         cylinder.radiusPoint = ensurePointNode(descriptor, cylinder.radiusPoint, radiusPoint);
-    } else if (cylinder.constructionMode
-        == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
-        const auto radiusPoint = resolvePointNode(
-            descriptor,
-            cylinder.radiusPoint,
-            {center.x + cylinder.radius, center.y, center.z});
-        cylinder.radius = radiusInCylinderPlane(radiusPoint, center);
+        if (auto* radiusNode = findPointNodeById(descriptor, cylinder.radiusPoint.id); radiusNode != nullptr) {
+            radiusNode->point.position = radiusPoint;
+        }
     }
 
     cylinder.constructionMode = mode;
@@ -1505,6 +1737,68 @@ void ViewerWindow::Viewport::setCylinderRadiusPoint(const renderer::scene_contra
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
 
+void ViewerWindow::Viewport::setCylinderAxisStart(const renderer::scene_contract::Vec3f& axisStart) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
+    auto& cylinder = primitive->cylinder;
+    cylinder.constructionMode =
+        renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius;
+    const auto center = resolvePointNode(descriptor, cylinder.center, {});
+    const auto axisEnd = resolvePointNode(
+        descriptor,
+        cylinder.axisEnd,
+        {center.x, center.y + cylinder.height * 0.5F, center.z});
+    cylinder.axisStart = ensurePointNode(descriptor, cylinder.axisStart, axisStart);
+    cylinder.axisEnd = ensurePointNode(descriptor, cylinder.axisEnd, axisEnd);
+    if (auto* startNode = findPointNodeById(descriptor, cylinder.axisStart.id); startNode != nullptr) {
+        startNode->point.position = axisStart;
+    }
+    cylinder.height = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(axisEnd, axisStart));
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setCylinderAxisEnd(const renderer::scene_contract::Vec3f& axisEnd) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::cylinder) {
+        return;
+    }
+
+    auto& cylinder = primitive->cylinder;
+    cylinder.constructionMode =
+        renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius;
+    const auto center = resolvePointNode(descriptor, cylinder.center, {});
+    const auto axisStart = resolvePointNode(
+        descriptor,
+        cylinder.axisStart,
+        {center.x, center.y - cylinder.height * 0.5F, center.z});
+    cylinder.axisStart = ensurePointNode(descriptor, cylinder.axisStart, axisStart);
+    cylinder.axisEnd = ensurePointNode(descriptor, cylinder.axisEnd, axisEnd);
+    if (auto* endNode = findPointNodeById(descriptor, cylinder.axisEnd.id); endNode != nullptr) {
+        endNode->point.position = axisEnd;
+    }
+    cylinder.height = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(axisEnd, axisStart));
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
 void ViewerWindow::Viewport::setSphereRadius(float radius) {
     const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
     if (objectIndex < 0) {
@@ -1568,8 +1862,53 @@ void ViewerWindow::Viewport::setSphereConstructionMode(
     }
 
     auto& sphere = primitive->sphere;
-    const auto center = resolvePointNode(descriptor, sphere.center, {});
-    sphere.center = ensurePointNode(descriptor, sphere.center, center);
+    auto center = resolvePointNode(descriptor, sphere.center, {});
+    if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
+        const auto surfacePoint = resolvePointNode(
+            descriptor,
+            sphere.surfacePoint,
+            {center.x + sphere.radius, center.y, center.z});
+        sphere.radius = renderer::scene_contract::math::length(
+            renderer::scene_contract::math::subtract(surfacePoint, center));
+    } else if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points) {
+        const auto diameterStart = resolvePointNode(
+            descriptor,
+            sphere.diameterStart,
+            {center.x - sphere.radius, center.y, center.z});
+        const auto diameterEnd = resolvePointNode(
+            descriptor,
+            sphere.diameterEnd,
+            {center.x + sphere.radius, center.y, center.z});
+        center = midpoint(diameterStart, diameterEnd);
+        sphere.radius = renderer::scene_contract::math::length(
+            renderer::scene_contract::math::subtract(diameterEnd, diameterStart)) * 0.5F;
+    }
+
+    if (mode == renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points) {
+        const renderer::scene_contract::Vec3f diameterStart {
+            center.x - sphere.radius,
+            center.y,
+            center.z
+        };
+        const renderer::scene_contract::Vec3f diameterEnd {
+            center.x + sphere.radius,
+            center.y,
+            center.z
+        };
+        sphere.diameterStart = ensurePointNode(descriptor, sphere.diameterStart, diameterStart);
+        sphere.diameterEnd = ensurePointNode(descriptor, sphere.diameterEnd, diameterEnd);
+        if (auto* startNode = findPointNodeById(descriptor, sphere.diameterStart.id); startNode != nullptr) {
+            startNode->point.position = diameterStart;
+        }
+        if (auto* endNode = findPointNodeById(descriptor, sphere.diameterEnd.id); endNode != nullptr) {
+            endNode->point.position = diameterEnd;
+        }
+    } else {
+        sphere.center = ensurePointNode(descriptor, sphere.center, center);
+        if (auto* centerNode = findPointNodeById(descriptor, sphere.center.id); centerNode != nullptr) {
+            centerNode->point.position = center;
+        }
+    }
 
     if (mode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
         const renderer::scene_contract::Vec3f surfacePoint {
@@ -1578,13 +1917,6 @@ void ViewerWindow::Viewport::setSphereConstructionMode(
             center.z
         };
         sphere.surfacePoint = ensurePointNode(descriptor, sphere.surfacePoint, surfacePoint);
-    } else if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
-        const auto surfacePoint = resolvePointNode(
-            descriptor,
-            sphere.surfacePoint,
-            {center.x + sphere.radius, center.y, center.z});
-        sphere.radius = renderer::scene_contract::math::length(
-            renderer::scene_contract::math::subtract(surfacePoint, center));
     }
 
     sphere.constructionMode = mode;
@@ -1643,6 +1975,66 @@ void ViewerWindow::Viewport::setSphereSurfacePoint(const renderer::scene_contrac
     }
     sphere.radius = renderer::scene_contract::math::length(
         renderer::scene_contract::math::subtract(surfacePoint, center));
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereDiameterStart(const renderer::scene_contract::Vec3f& diameterStart) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
+    auto& sphere = primitive->sphere;
+    sphere.constructionMode = renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points;
+    const auto center = resolvePointNode(descriptor, sphere.center, {});
+    const auto diameterEnd = resolvePointNode(
+        descriptor,
+        sphere.diameterEnd,
+        {center.x + sphere.radius, center.y, center.z});
+    sphere.diameterStart = ensurePointNode(descriptor, sphere.diameterStart, diameterStart);
+    sphere.diameterEnd = ensurePointNode(descriptor, sphere.diameterEnd, diameterEnd);
+    if (auto* startNode = findPointNodeById(descriptor, sphere.diameterStart.id); startNode != nullptr) {
+        startNode->point.position = diameterStart;
+    }
+    sphere.radius = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(diameterEnd, diameterStart)) * 0.5F;
+
+    applyParametricObjectDescriptor(objectIndex, descriptor);
+}
+
+void ViewerWindow::Viewport::setSphereDiameterEnd(const renderer::scene_contract::Vec3f& diameterEnd) {
+    const int objectIndex = findObjectIndexById(selectionState_.selectedObjectId);
+    if (objectIndex < 0) {
+        return;
+    }
+
+    auto descriptor = sceneObjects_[objectIndex].parametricObjectDescriptor;
+    auto* primitive = ensureObjectPrimitive(descriptor);
+    if (primitive == nullptr || primitive->kind != renderer::parametric_model::PrimitiveKind::sphere) {
+        return;
+    }
+
+    auto& sphere = primitive->sphere;
+    sphere.constructionMode = renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points;
+    const auto center = resolvePointNode(descriptor, sphere.center, {});
+    const auto diameterStart = resolvePointNode(
+        descriptor,
+        sphere.diameterStart,
+        {center.x - sphere.radius, center.y, center.z});
+    sphere.diameterStart = ensurePointNode(descriptor, sphere.diameterStart, diameterStart);
+    sphere.diameterEnd = ensurePointNode(descriptor, sphere.diameterEnd, diameterEnd);
+    if (auto* endNode = findPointNodeById(descriptor, sphere.diameterEnd.id); endNode != nullptr) {
+        endNode->point.position = diameterEnd;
+    }
+    sphere.radius = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(diameterEnd, diameterStart)) * 0.5F;
 
     applyParametricObjectDescriptor(objectIndex, descriptor);
 }
@@ -2111,6 +2503,24 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
         objectState.evaluationSummary.diagnosticCount = evaluationResult.diagnostics.size();
         objectState.evaluationSummary.warningCount = 0U;
         objectState.evaluationSummary.errorCount = 0U;
+
+        const auto unitEvaluations =
+            renderer::parametric_model::ParametricModelStructure::describeUnitEvaluations(
+                descriptor,
+                evaluationResult);
+        objectState.unitEvaluations.clear();
+        objectState.unitEvaluations.reserve(unitEvaluations.size());
+        for (const auto& evaluation : unitEvaluations) {
+            objectState.unitEvaluations.push_back({
+                evaluation.unitId,
+                evaluation.featureId,
+                evaluation.status,
+                evaluation.diagnosticCount,
+                evaluation.warningCount,
+                evaluation.errorCount
+            });
+        }
+
         objectState.evaluationDiagnostics.clear();
         objectState.evaluationDiagnostics.reserve(evaluationResult.diagnostics.size());
         for (const auto& diagnostic : evaluationResult.diagnostics) {
@@ -2877,7 +3287,9 @@ void ViewerWindow::Viewport::applyParametricObjectDescriptor(
         return;
     }
 
-    sceneObjects_[index].parametricObjectDescriptor = descriptor;
+    auto normalizedDescriptor = descriptor;
+    pruneUnreferencedParametricNodes(normalizedDescriptor);
+    sceneObjects_[index].parametricObjectDescriptor = normalizedDescriptor;
     normalizeSelectionState();
     rebuildObjectMesh(index);
     markModelChanged(model_change_view::ChangeKind::geometry_or_transform);

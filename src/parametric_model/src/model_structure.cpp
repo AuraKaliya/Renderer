@@ -65,6 +65,31 @@ void appendConstructionLink(
     links.push_back(link);
 }
 
+void appendConstructionLinkBySemantics(
+    std::vector<ParametricConstructionLinkDescriptor>& links,
+    const FeatureDescriptor& feature,
+    const std::vector<ParametricUnitInputDescriptor>& inputs,
+    ParametricConstructionKind constructionKind,
+    ParametricInputSemantic startSemantic,
+    ParametricInputSemantic endSemantic)
+{
+    const auto* startInput = findNodeInput(inputs, feature.id, startSemantic);
+    const auto* endInput = findNodeInput(inputs, feature.id, endSemantic);
+    if (startInput == nullptr || endInput == nullptr) {
+        return;
+    }
+
+    ParametricConstructionLinkDescriptor link;
+    link.unitId = effectiveUnitId(feature);
+    link.featureId = feature.id;
+    link.constructionKind = constructionKind;
+    link.startNodeId = startInput->nodeId;
+    link.endNodeId = endInput->nodeId;
+    link.startSemantic = startInput->semantic;
+    link.endSemantic = endInput->semantic;
+    links.push_back(link);
+}
+
 const ParametricNodeDescriptor* findPointNode(
     const ParametricObjectDescriptor& descriptor,
     ParametricNodeId nodeId)
@@ -116,6 +141,22 @@ float distanceInCylinderPlane(
     return std::sqrt(dx * dx + dz * dz);
 }
 
+void applyDiagnosticToUnitEvaluation(
+    ParametricUnitEvaluationDescriptor& evaluation,
+    const EvaluationDiagnostic& diagnostic)
+{
+    ++evaluation.diagnosticCount;
+    if (diagnostic.severity == EvaluationDiagnosticSeverity::warning) {
+        ++evaluation.warningCount;
+        if (evaluation.status == ParametricUnitEvaluationStatus::valid) {
+            evaluation.status = ParametricUnitEvaluationStatus::warning;
+        }
+    } else if (diagnostic.severity == EvaluationDiagnosticSeverity::error) {
+        ++evaluation.errorCount;
+        evaluation.status = ParametricUnitEvaluationStatus::error;
+    }
+}
+
 }  // namespace
 
 ParametricUnitKind ParametricModelStructure::unitKindForFeatureKind(FeatureKind kind) {
@@ -150,18 +191,35 @@ ParametricConstructionKind ParametricModelStructure::constructionKindForFeature(
     case FeatureKind::primitive:
         switch (feature.primitive.kind) {
         case PrimitiveKind::box:
-            return feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::center_corner_point
-                ? ParametricConstructionKind::box_center_corner_point
-                : ParametricConstructionKind::box_center_size;
+            switch (feature.primitive.box.constructionMode) {
+            case BoxSpec::ConstructionMode::center_corner_point:
+                return ParametricConstructionKind::box_center_corner_point;
+            case BoxSpec::ConstructionMode::corner_points:
+                return ParametricConstructionKind::box_corner_points;
+            case BoxSpec::ConstructionMode::center_size:
+                return ParametricConstructionKind::box_center_size;
+            }
+            break;
         case PrimitiveKind::cylinder:
-            return feature.primitive.cylinder.constructionMode
-                    == CylinderSpec::ConstructionMode::center_radius_point_height
-                ? ParametricConstructionKind::cylinder_center_radius_point_height
-                : ParametricConstructionKind::cylinder_center_radius_height;
+            switch (feature.primitive.cylinder.constructionMode) {
+            case CylinderSpec::ConstructionMode::center_radius_point_height:
+                return ParametricConstructionKind::cylinder_center_radius_point_height;
+            case CylinderSpec::ConstructionMode::axis_endpoints_radius:
+                return ParametricConstructionKind::cylinder_axis_endpoints_radius;
+            case CylinderSpec::ConstructionMode::center_radius_height:
+                return ParametricConstructionKind::cylinder_center_radius_height;
+            }
+            break;
         case PrimitiveKind::sphere:
-            return feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::center_surface_point
-                ? ParametricConstructionKind::sphere_center_surface_point
-                : ParametricConstructionKind::sphere_center_radius;
+            switch (feature.primitive.sphere.constructionMode) {
+            case SphereSpec::ConstructionMode::center_surface_point:
+                return ParametricConstructionKind::sphere_center_surface_point;
+            case SphereSpec::ConstructionMode::diameter_points:
+                return ParametricConstructionKind::sphere_diameter_points;
+            case SphereSpec::ConstructionMode::center_radius:
+                return ParametricConstructionKind::sphere_center_radius;
+            }
+            break;
         }
         break;
     case FeatureKind::mirror:
@@ -203,8 +261,11 @@ std::vector<ParametricUnitInputDescriptor> ParametricModelStructure::describeUni
         case FeatureKind::primitive:
             switch (feature.primitive.kind) {
             case PrimitiveKind::box:
-                appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.box.center.id);
-                if (feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::center_corner_point) {
+                if (feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::corner_points) {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::corner_start, feature.primitive.box.cornerStart.id);
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::corner_end, feature.primitive.box.cornerEnd.id);
+                } else if (feature.primitive.box.constructionMode == BoxSpec::ConstructionMode::center_corner_point) {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.box.center.id);
                     appendInput(
                         inputs,
                         feature,
@@ -212,32 +273,48 @@ std::vector<ParametricUnitInputDescriptor> ParametricModelStructure::describeUni
                         ParametricInputSemantic::corner_point,
                         feature.primitive.box.cornerPoint.id);
                 } else {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.box.center.id);
                     appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::width);
                     appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::height);
                     appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::depth);
                 }
                 break;
             case PrimitiveKind::cylinder:
-                appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.cylinder.center.id);
                 if (feature.primitive.cylinder.constructionMode
-                    == CylinderSpec::ConstructionMode::center_radius_point_height) {
+                    == CylinderSpec::ConstructionMode::axis_endpoints_radius) {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::axis_start, feature.primitive.cylinder.axisStart.id);
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::axis_end, feature.primitive.cylinder.axisEnd.id);
+                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
+                } else {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.cylinder.center.id);
+                    if (feature.primitive.cylinder.constructionMode
+                        == CylinderSpec::ConstructionMode::center_radius_point_height) {
+                        appendInput(
+                            inputs,
+                            feature,
+                            ParametricInputKind::node,
+                            ParametricInputSemantic::radius_point,
+                            feature.primitive.cylinder.radiusPoint.id);
+                    } else {
+                        appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
+                    }
                     appendInput(
                         inputs,
                         feature,
-                        ParametricInputKind::node,
-                        ParametricInputSemantic::radius_point,
-                        feature.primitive.cylinder.radiusPoint.id);
-                } else {
-                    appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
+                        ParametricInputKind::float_value,
+                        ParametricInputSemantic::height);
                 }
-                appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::height);
                 appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::segments);
                 break;
             case PrimitiveKind::sphere:
-                appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.sphere.center.id);
-                if (feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::center_surface_point) {
+                if (feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::diameter_points) {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::diameter_start, feature.primitive.sphere.diameterStart.id);
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::diameter_end, feature.primitive.sphere.diameterEnd.id);
+                } else if (feature.primitive.sphere.constructionMode == SphereSpec::ConstructionMode::center_surface_point) {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.sphere.center.id);
                     appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::surface_point, feature.primitive.sphere.surfacePoint.id);
                 } else {
+                    appendInput(inputs, feature, ParametricInputKind::node, ParametricInputSemantic::center, feature.primitive.sphere.center.id);
                     appendInput(inputs, feature, ParametricInputKind::float_value, ParametricInputSemantic::radius);
                 }
                 appendInput(inputs, feature, ParametricInputKind::integer_value, ParametricInputSemantic::slices);
@@ -302,6 +379,15 @@ std::vector<ParametricConstructionLinkDescriptor> ParametricModelStructure::desc
                 constructionKind,
                 ParametricInputSemantic::corner_point);
             break;
+        case ParametricConstructionKind::box_corner_points:
+            appendConstructionLinkBySemantics(
+                links,
+                feature,
+                inputs,
+                constructionKind,
+                ParametricInputSemantic::corner_start,
+                ParametricInputSemantic::corner_end);
+            break;
         case ParametricConstructionKind::cylinder_center_radius_point_height:
             appendConstructionLink(
                 links,
@@ -310,6 +396,15 @@ std::vector<ParametricConstructionLinkDescriptor> ParametricModelStructure::desc
                 constructionKind,
                 ParametricInputSemantic::radius_point);
             break;
+        case ParametricConstructionKind::cylinder_axis_endpoints_radius:
+            appendConstructionLinkBySemantics(
+                links,
+                feature,
+                inputs,
+                constructionKind,
+                ParametricInputSemantic::axis_start,
+                ParametricInputSemantic::axis_end);
+            break;
         case ParametricConstructionKind::sphere_center_surface_point:
             appendConstructionLink(
                 links,
@@ -317,6 +412,15 @@ std::vector<ParametricConstructionLinkDescriptor> ParametricModelStructure::desc
                 inputs,
                 constructionKind,
                 ParametricInputSemantic::surface_point);
+            break;
+        case ParametricConstructionKind::sphere_diameter_points:
+            appendConstructionLinkBySemantics(
+                links,
+                feature,
+                inputs,
+                constructionKind,
+                ParametricInputSemantic::diameter_start,
+                ParametricInputSemantic::diameter_end);
             break;
         case ParametricConstructionKind::box_center_size:
         case ParametricConstructionKind::cylinder_center_radius_height:
@@ -376,6 +480,40 @@ std::vector<ParametricDerivedParameterDescriptor> ParametricModelStructure::desc
                 cornerNode->id);
             break;
         }
+        case ParametricConstructionKind::box_corner_points: {
+            const auto& box = feature.primitive.box;
+            const auto* startNode = findPointNode(descriptor, box.cornerStart.id);
+            const auto* endNode = findPointNode(descriptor, box.cornerEnd.id);
+            if (startNode == nullptr || endNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::width,
+                std::abs(endNode->point.position.x - startNode->point.position.x),
+                startNode->id,
+                endNode->id);
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::height,
+                std::abs(endNode->point.position.y - startNode->point.position.y),
+                startNode->id,
+                endNode->id);
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::depth,
+                std::abs(endNode->point.position.z - startNode->point.position.z),
+                startNode->id,
+                endNode->id);
+            break;
+        }
         case ParametricConstructionKind::cylinder_center_radius_point_height: {
             const auto& cylinder = feature.primitive.cylinder;
             const auto* centerNode = findPointNode(descriptor, cylinder.center.id);
@@ -392,6 +530,24 @@ std::vector<ParametricDerivedParameterDescriptor> ParametricModelStructure::desc
                 distanceInCylinderPlane(radiusNode->point.position, centerNode->point.position),
                 centerNode->id,
                 radiusNode->id);
+            break;
+        }
+        case ParametricConstructionKind::cylinder_axis_endpoints_radius: {
+            const auto& cylinder = feature.primitive.cylinder;
+            const auto* startNode = findPointNode(descriptor, cylinder.axisStart.id);
+            const auto* endNode = findPointNode(descriptor, cylinder.axisEnd.id);
+            if (startNode == nullptr || endNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::height,
+                distance3(endNode->point.position, startNode->point.position),
+                startNode->id,
+                endNode->id);
             break;
         }
         case ParametricConstructionKind::sphere_center_surface_point: {
@@ -412,6 +568,24 @@ std::vector<ParametricDerivedParameterDescriptor> ParametricModelStructure::desc
                 surfaceNode->id);
             break;
         }
+        case ParametricConstructionKind::sphere_diameter_points: {
+            const auto& sphere = feature.primitive.sphere;
+            const auto* startNode = findPointNode(descriptor, sphere.diameterStart.id);
+            const auto* endNode = findPointNode(descriptor, sphere.diameterEnd.id);
+            if (startNode == nullptr || endNode == nullptr) {
+                break;
+            }
+
+            appendDerivedParameter(
+                parameters,
+                feature,
+                constructionKind,
+                ParametricInputSemantic::radius,
+                distance3(endNode->point.position, startNode->point.position) * 0.5F,
+                startNode->id,
+                endNode->id);
+            break;
+        }
         case ParametricConstructionKind::box_center_size:
         case ParametricConstructionKind::cylinder_center_radius_height:
         case ParametricConstructionKind::sphere_center_radius:
@@ -422,6 +596,34 @@ std::vector<ParametricDerivedParameterDescriptor> ParametricModelStructure::desc
     }
 
     return parameters;
+}
+
+std::vector<ParametricUnitEvaluationDescriptor> ParametricModelStructure::describeUnitEvaluations(
+    const ParametricObjectDescriptor& descriptor,
+    const EvaluationResult& evaluationResult)
+{
+    const auto units = describeUnits(descriptor);
+    std::vector<ParametricUnitEvaluationDescriptor> evaluations;
+    evaluations.reserve(units.size());
+
+    for (const auto& unit : units) {
+        ParametricUnitEvaluationDescriptor evaluation;
+        evaluation.unitId = unit.id;
+        evaluation.featureId = unit.featureId;
+        evaluation.status = unit.enabled
+            ? ParametricUnitEvaluationStatus::valid
+            : ParametricUnitEvaluationStatus::skipped;
+
+        for (const auto& diagnostic : evaluationResult.diagnostics) {
+            if (diagnostic.featureId == unit.featureId) {
+                applyDiagnosticToUnitEvaluation(evaluation, diagnostic);
+            }
+        }
+
+        evaluations.push_back(evaluation);
+    }
+
+    return evaluations;
 }
 
 }  // namespace renderer::parametric_model

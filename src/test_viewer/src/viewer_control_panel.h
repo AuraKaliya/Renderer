@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,16 @@ public:
         renderer::parametric_model::ParametricConstructionKind constructionKind =
             renderer::parametric_model::ParametricConstructionKind::box_center_size;
         bool enabled = true;
+    };
+
+    struct UnitEvaluationPanelState {
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricUnitEvaluationStatus status =
+            renderer::parametric_model::ParametricUnitEvaluationStatus::valid;
+        std::uint32_t diagnosticCount = 0U;
+        std::uint32_t warningCount = 0U;
+        std::uint32_t errorCount = 0U;
     };
 
     struct UnitInputPanelState {
@@ -120,6 +131,7 @@ public:
         SceneObjectControlWidget::LinearArrayState linearArray {};
         std::vector<FeaturePanelState> features;
         std::vector<UnitPanelState> units;
+        std::vector<UnitEvaluationPanelState> unitEvaluations;
         std::vector<UnitInputPanelState> unitInputs;
         std::vector<NodeUsagePanelState> nodeUsages;
         std::vector<ConstructionLinkPanelState> constructionLinks;
@@ -191,18 +203,24 @@ signals:
     void boxDepthChanged(float depth);
     void boxCenterChanged(float x, float y, float z);
     void boxCornerPointChanged(float x, float y, float z);
+    void boxCornerStartChanged(float x, float y, float z);
+    void boxCornerEndChanged(float x, float y, float z);
     void cylinderConstructionModeChanged(int mode);
     void cylinderRadiusChanged(float radius);
     void cylinderHeightChanged(float height);
     void cylinderSegmentsChanged(int segments);
     void cylinderCenterChanged(float x, float y, float z);
     void cylinderRadiusPointChanged(float x, float y, float z);
+    void cylinderAxisStartChanged(float x, float y, float z);
+    void cylinderAxisEndChanged(float x, float y, float z);
     void sphereRadiusChanged(float radius);
     void sphereSlicesChanged(int slices);
     void sphereStacksChanged(int stacks);
     void sphereConstructionModeChanged(int mode);
     void sphereCenterChanged(float x, float y, float z);
     void sphereSurfacePointChanged(float x, float y, float z);
+    void sphereDiameterStartChanged(float x, float y, float z);
+    void sphereDiameterEndChanged(float x, float y, float z);
     void parametricOverlayModelBoundsChanged(bool visible);
     void parametricOverlayNodePointsChanged(bool visible);
     void parametricOverlayConstructionLinksChanged(bool visible);
@@ -234,6 +252,7 @@ private:
     QLabel* evaluationSummaryLabel_ = nullptr;
     QListWidget* parametricBoundsListWidget_ = nullptr;
     QListWidget* unitListWidget_ = nullptr;
+    QListWidget* unitEvaluationListWidget_ = nullptr;
     QListWidget* unitInputListWidget_ = nullptr;
     QListWidget* nodeUsageListWidget_ = nullptr;
     QListWidget* constructionLinkListWidget_ = nullptr;

@@ -33,6 +33,37 @@ For UI helper switches, read the current function body before patching string-re
 
 ---
 
+## [ERR-20260417-003] apply-patch-overbroad-context
+
+**Logged**: 2026-04-17T00:00:00+08:00
+**Priority**: medium
+**Status**: pending
+**Area**: backend
+
+### Summary
+在同一文件存在多个相邻 setter 函数时，过宽的 `apply_patch` 上下文误命中了后续函数区域，导致 `viewer_window.cpp` 产生重复且错位的函数块。
+
+### Error
+```text
+rg found duplicated definitions:
+void ViewerWindow::Viewport::setSphereConstructionMode(...)
+void ViewerWindow::Viewport::setCylinderRadius(...)
+```
+
+### Context
+- 操作：为 `setCylinderConstructionMode(...)` 增加轴端点模式状态保留逻辑。
+- 文件：`src/test_viewer/src/viewer_window.cpp`
+- 现象：补丁匹配到后续球体构造函数附近，插入了重复的圆柱/球体 setter 块，并在球体函数中出现 `cylinder` 变量引用。
+
+### Suggested Fix
+编辑包含大量相似 setter 的文件时，先用 `rg -n` 定位函数边界，再用更窄的上下文或分段补丁；补丁后立即用 `rg -n "void .*函数名"` 检查重复定义。
+
+### Metadata
+- Reproducible: yes
+- Related Files: src/test_viewer/src/viewer_window.cpp
+
+---
+
 ## [ERR-20260416-001] qt-moc-spawn-sandbox
 
 **Logged**: 2026-04-16T00:00:00+08:00

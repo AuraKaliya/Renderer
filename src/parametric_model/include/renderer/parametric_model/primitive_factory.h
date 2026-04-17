@@ -9,6 +9,15 @@ class PrimitiveFactory {
 public:
     [[nodiscard]] static ParametricNodeDescriptor makePointNode(
         const scene_contract::Vec3f& position);
+    [[nodiscard]] static ParametricNodeDescriptor makeDirectionNode(
+        const scene_contract::Vec3f& direction);
+    [[nodiscard]] static ParametricNodeDescriptor makeAxisNode(
+        const scene_contract::Vec3f& origin,
+        const scene_contract::Vec3f& direction);
+    [[nodiscard]] static ParametricNodeDescriptor makePlaneNode(
+        const scene_contract::Vec3f& origin,
+        const scene_contract::Vec3f& normal);
+    [[nodiscard]] static ParametricNodeDescriptor makeScalarNode(float value);
 
     [[nodiscard]] static PrimitiveDescriptor makeBoxDescriptor(
         float width,
@@ -45,6 +54,10 @@ public:
         const scene_contract::Vec3f& center,
         const scene_contract::Vec3f& cornerPoint);
 
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricBoxFromCornerPoints(
+        const scene_contract::Vec3f& cornerStart,
+        const scene_contract::Vec3f& cornerEnd);
+
     [[nodiscard]] static ParametricObjectDescriptor makeParametricCylinderFromCenterRadiusHeight(
         const scene_contract::Vec3f& center,
         float radius,
@@ -57,6 +70,12 @@ public:
         float height,
         std::uint32_t segments = 24U);
 
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricCylinderFromAxisEndpointsRadius(
+        const scene_contract::Vec3f& axisStart,
+        const scene_contract::Vec3f& axisEnd,
+        float radius,
+        std::uint32_t segments = 24U);
+
     [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromCenterRadius(
         const scene_contract::Vec3f& center,
         float radius,
@@ -66,6 +85,12 @@ public:
     [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromCenterSurfacePoint(
         const scene_contract::Vec3f& center,
         const scene_contract::Vec3f& surfacePoint,
+        std::uint32_t slices = 24U,
+        std::uint32_t stacks = 16U);
+
+    [[nodiscard]] static ParametricObjectDescriptor makeParametricSphereFromDiameterPoints(
+        const scene_contract::Vec3f& diameterStart,
+        const scene_contract::Vec3f& diameterEnd,
         std::uint32_t slices = 24U,
         std::uint32_t stacks = 16U);
 

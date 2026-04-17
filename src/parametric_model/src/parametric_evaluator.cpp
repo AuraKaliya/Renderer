@@ -133,8 +133,52 @@ scene_contract::Vec3f subtractVec3(
     };
 }
 
+scene_contract::Vec3f midpointVec3(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    return {
+        (left.x + right.x) * 0.5F,
+        (left.y + right.y) * 0.5F,
+        (left.z + right.z) * 0.5F
+    };
+}
+
 float lengthVec3(const scene_contract::Vec3f& value) {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+}
+
+scene_contract::Vec3f scaleVec3(
+    const scene_contract::Vec3f& value,
+    float scale)
+{
+    return {
+        value.x * scale,
+        value.y * scale,
+        value.z * scale
+    };
+}
+
+scene_contract::Vec3f crossVec3(
+    const scene_contract::Vec3f& left,
+    const scene_contract::Vec3f& right)
+{
+    return {
+        left.y * right.z - left.z * right.y,
+        left.z * right.x - left.x * right.z,
+        left.x * right.y - left.y * right.x
+    };
+}
+
+scene_contract::Vec3f normalizeVec3(
+    const scene_contract::Vec3f& value,
+    const scene_contract::Vec3f& fallback)
+{
+    const float length = lengthVec3(value);
+    if (length <= kMinimumDimension) {
+        return fallback;
+    }
+    return scaleVec3(value, 1.0F / length);
 }
 
 float radiusInCylinderPlane(
@@ -153,6 +197,39 @@ void translateMesh(scene_contract::MeshData& mesh, const scene_contract::Vec3f& 
 
     for (auto& vertex : mesh.vertices) {
         vertex.position = addVec3(vertex.position, offset);
+    }
+    mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
+}
+
+scene_contract::Vec3f transformBasis(
+    const scene_contract::Vec3f& value,
+    const scene_contract::Vec3f& basisX,
+    const scene_contract::Vec3f& basisY,
+    const scene_contract::Vec3f& basisZ)
+{
+    return {
+        basisX.x * value.x + basisY.x * value.y + basisZ.x * value.z,
+        basisX.y * value.x + basisY.y * value.y + basisZ.y * value.z,
+        basisX.z * value.x + basisY.z * value.y + basisZ.z * value.z
+    };
+}
+
+void orientCylinderMesh(
+    scene_contract::MeshData& mesh,
+    const scene_contract::Vec3f& center,
+    const scene_contract::Vec3f& axisDirection)
+{
+    const auto basisY = normalizeVec3(axisDirection, {0.0F, 1.0F, 0.0F});
+    const scene_contract::Vec3f helper =
+        std::abs(basisY.y) > 0.95F
+            ? scene_contract::Vec3f {1.0F, 0.0F, 0.0F}
+            : scene_contract::Vec3f {0.0F, 1.0F, 0.0F};
+    const auto basisX = normalizeVec3(crossVec3(helper, basisY), {1.0F, 0.0F, 0.0F});
+    const auto basisZ = normalizeVec3(crossVec3(basisY, basisX), {0.0F, 0.0F, 1.0F});
+
+    for (auto& vertex : mesh.vertices) {
+        vertex.position = addVec3(center, transformBasis(vertex.position, basisX, basisY, basisZ));
+        vertex.normal = normalizeVec3(transformBasis(vertex.normal, basisX, basisY, basisZ), vertex.normal);
     }
     mesh.localBounds = computeBoundsFromVertices(mesh.vertices);
 }
@@ -497,7 +574,7 @@ scene_contract::MeshData buildBoxMesh(
     std::vector<EvaluationDiagnostic>& diagnostics,
     ParametricFeatureId featureId)
 {
-    const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
     if (spec.constructionMode == BoxSpec::ConstructionMode::center_corner_point) {
         const scene_contract::Vec3f defaultCornerPoint = {
             center.x + spec.width * 0.5F,
@@ -513,6 +590,33 @@ scene_contract::MeshData buildBoxMesh(
         spec.width = std::abs((cornerPoint.x - center.x) * 2.0F);
         spec.height = std::abs((cornerPoint.y - center.y) * 2.0F);
         spec.depth = std::abs((cornerPoint.z - center.z) * 2.0F);
+    } else if (spec.constructionMode == BoxSpec::ConstructionMode::corner_points) {
+        const scene_contract::Vec3f defaultStart = {
+            center.x - spec.width * 0.5F,
+            center.y - spec.height * 0.5F,
+            center.z - spec.depth * 0.5F
+        };
+        const scene_contract::Vec3f defaultEnd = {
+            center.x + spec.width * 0.5F,
+            center.y + spec.height * 0.5F,
+            center.z + spec.depth * 0.5F
+        };
+        const auto cornerStart = resolvePointNode(
+            nodes,
+            spec.cornerStart,
+            defaultStart,
+            &diagnostics,
+            featureId);
+        const auto cornerEnd = resolvePointNode(
+            nodes,
+            spec.cornerEnd,
+            defaultEnd,
+            &diagnostics,
+            featureId);
+        center = midpointVec3(cornerStart, cornerEnd);
+        spec.width = std::abs(cornerEnd.x - cornerStart.x);
+        spec.height = std::abs(cornerEnd.y - cornerStart.y);
+        spec.depth = std::abs(cornerEnd.z - cornerStart.z);
     }
 
     auto mesh = buildBoxMesh(normalizeBoxSpec(spec, diagnostics, featureId));
@@ -579,7 +683,41 @@ scene_contract::MeshData buildCylinderMesh(
     std::vector<EvaluationDiagnostic>& diagnostics,
     ParametricFeatureId featureId)
 {
-    const auto center = resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    auto center = spec.constructionMode == CylinderSpec::ConstructionMode::axis_endpoints_radius
+        ? resolvePointNode(nodes, spec.center, {})
+        : resolvePointNode(nodes, spec.center, {}, &diagnostics, featureId);
+    if (spec.constructionMode == CylinderSpec::ConstructionMode::axis_endpoints_radius) {
+        const scene_contract::Vec3f defaultStart = {
+            center.x,
+            center.y - spec.height * 0.5F,
+            center.z
+        };
+        const scene_contract::Vec3f defaultEnd = {
+            center.x,
+            center.y + spec.height * 0.5F,
+            center.z
+        };
+        const auto axisStart = resolvePointNode(
+            nodes,
+            spec.axisStart,
+            defaultStart,
+            &diagnostics,
+            featureId);
+        const auto axisEnd = resolvePointNode(
+            nodes,
+            spec.axisEnd,
+            defaultEnd,
+            &diagnostics,
+            featureId);
+        const auto axisDirection = subtractVec3(axisEnd, axisStart);
+        center = midpointVec3(axisStart, axisEnd);
+        spec.height = lengthVec3(axisDirection);
+
+        auto mesh = buildCylinderMesh(normalizeCylinderSpec(spec, diagnostics, featureId));
+        orientCylinderMesh(mesh, center, axisDirection);
+        return mesh;
+    }
+
     if (spec.constructionMode == CylinderSpec::ConstructionMode::center_radius_point_height) {
         const scene_contract::Vec3f defaultRadiusPoint = {
             center.x + spec.radius,
@@ -666,6 +804,31 @@ scene_contract::MeshData buildSphereMesh(
             &diagnostics,
             featureId);
         spec.radius = lengthVec3(subtractVec3(surfacePoint, center));
+    } else if (spec.constructionMode == SphereSpec::ConstructionMode::diameter_points) {
+        const scene_contract::Vec3f defaultStart = {
+            center.x - spec.radius,
+            center.y,
+            center.z
+        };
+        const scene_contract::Vec3f defaultEnd = {
+            center.x + spec.radius,
+            center.y,
+            center.z
+        };
+        const auto diameterStart = resolvePointNode(
+            nodes,
+            spec.diameterStart,
+            defaultStart,
+            &diagnostics,
+            featureId);
+        const auto diameterEnd = resolvePointNode(
+            nodes,
+            spec.diameterEnd,
+            defaultEnd,
+            &diagnostics,
+            featureId);
+        center = midpointVec3(diameterStart, diameterEnd);
+        spec.radius = lengthVec3(subtractVec3(diameterEnd, diameterStart)) * 0.5F;
     }
 
     auto mesh = buildSphereMesh(normalizeSphereSpec(spec, diagnostics, featureId));

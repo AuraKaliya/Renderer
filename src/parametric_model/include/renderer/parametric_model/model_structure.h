@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "renderer/parametric_model/evaluation_result.h"
 #include "renderer/parametric_model/types.h"
 
 namespace renderer::parametric_model {
@@ -22,6 +23,9 @@ public:
         const ParametricObjectDescriptor& descriptor);
     [[nodiscard]] static std::vector<ParametricDerivedParameterDescriptor> describeDerivedParameters(
         const ParametricObjectDescriptor& descriptor);
+    [[nodiscard]] static std::vector<ParametricUnitEvaluationDescriptor> describeUnitEvaluations(
+        const ParametricObjectDescriptor& descriptor,
+        const EvaluationResult& evaluationResult);
 };
 
 }  // namespace renderer::parametric_model

@@ -116,20 +116,41 @@ QString unitKindText(renderer::parametric_model::ParametricUnitKind kind) {
     return QStringLiteral("Unknown");
 }
 
+QString unitEvaluationStatusText(renderer::parametric_model::ParametricUnitEvaluationStatus status) {
+    switch (status) {
+    case renderer::parametric_model::ParametricUnitEvaluationStatus::valid:
+        return QStringLiteral("valid");
+    case renderer::parametric_model::ParametricUnitEvaluationStatus::warning:
+        return QStringLiteral("warning");
+    case renderer::parametric_model::ParametricUnitEvaluationStatus::error:
+        return QStringLiteral("error");
+    case renderer::parametric_model::ParametricUnitEvaluationStatus::skipped:
+        return QStringLiteral("skipped");
+    }
+
+    return QStringLiteral("unknown");
+}
+
 QString constructionKindText(renderer::parametric_model::ParametricConstructionKind kind) {
     switch (kind) {
     case renderer::parametric_model::ParametricConstructionKind::box_center_size:
         return QStringLiteral("Box: center + size");
     case renderer::parametric_model::ParametricConstructionKind::box_center_corner_point:
         return QStringLiteral("Box: center + corner point");
+    case renderer::parametric_model::ParametricConstructionKind::box_corner_points:
+        return QStringLiteral("Box: two corner points");
     case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_height:
         return QStringLiteral("Cylinder: center + radius + height");
     case renderer::parametric_model::ParametricConstructionKind::cylinder_center_radius_point_height:
         return QStringLiteral("Cylinder: center + radius point + height");
+    case renderer::parametric_model::ParametricConstructionKind::cylinder_axis_endpoints_radius:
+        return QStringLiteral("Cylinder: axis endpoints + radius");
     case renderer::parametric_model::ParametricConstructionKind::sphere_center_radius:
         return QStringLiteral("Sphere: center + radius");
     case renderer::parametric_model::ParametricConstructionKind::sphere_center_surface_point:
         return QStringLiteral("Sphere: center + surface point");
+    case renderer::parametric_model::ParametricConstructionKind::sphere_diameter_points:
+        return QStringLiteral("Sphere: diameter points");
     case renderer::parametric_model::ParametricConstructionKind::mirror_axis_plane:
         return QStringLiteral("Mirror: axis + plane");
     case renderer::parametric_model::ParametricConstructionKind::linear_array_count_offset:
@@ -164,8 +185,20 @@ QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic se
         return QStringLiteral("surface point");
     case renderer::parametric_model::ParametricInputSemantic::corner_point:
         return QStringLiteral("corner point");
+    case renderer::parametric_model::ParametricInputSemantic::corner_start:
+        return QStringLiteral("corner start");
+    case renderer::parametric_model::ParametricInputSemantic::corner_end:
+        return QStringLiteral("corner end");
     case renderer::parametric_model::ParametricInputSemantic::radius_point:
         return QStringLiteral("radius point");
+    case renderer::parametric_model::ParametricInputSemantic::axis_start:
+        return QStringLiteral("axis start");
+    case renderer::parametric_model::ParametricInputSemantic::axis_end:
+        return QStringLiteral("axis end");
+    case renderer::parametric_model::ParametricInputSemantic::diameter_start:
+        return QStringLiteral("diameter start");
+    case renderer::parametric_model::ParametricInputSemantic::diameter_end:
+        return QStringLiteral("diameter end");
     case renderer::parametric_model::ParametricInputSemantic::width:
         return QStringLiteral("width");
     case renderer::parametric_model::ParametricInputSemantic::height:
@@ -188,6 +221,58 @@ QString inputSemanticText(renderer::parametric_model::ParametricInputSemantic se
         return QStringLiteral("count");
     case renderer::parametric_model::ParametricInputSemantic::offset:
         return QStringLiteral("offset");
+    }
+
+    return QStringLiteral("unknown");
+}
+
+QString nodeKindText(renderer::parametric_model::ParametricNodeKind kind) {
+    switch (kind) {
+    case renderer::parametric_model::ParametricNodeKind::point:
+        return QStringLiteral("Point");
+    case renderer::parametric_model::ParametricNodeKind::direction:
+        return QStringLiteral("Direction");
+    case renderer::parametric_model::ParametricNodeKind::axis:
+        return QStringLiteral("Axis");
+    case renderer::parametric_model::ParametricNodeKind::plane:
+        return QStringLiteral("Plane");
+    case renderer::parametric_model::ParametricNodeKind::scalar:
+        return QStringLiteral("Scalar");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
+QString nodeValueText(const renderer::parametric_model::ParametricNodeDescriptor& node) {
+    switch (node.kind) {
+    case renderer::parametric_model::ParametricNodeKind::point:
+        return QStringLiteral("(%1, %2, %3)")
+            .arg(node.point.position.x, 0, 'f', 2)
+            .arg(node.point.position.y, 0, 'f', 2)
+            .arg(node.point.position.z, 0, 'f', 2);
+    case renderer::parametric_model::ParametricNodeKind::direction:
+        return QStringLiteral("dir(%1, %2, %3)")
+            .arg(node.direction.direction.x, 0, 'f', 2)
+            .arg(node.direction.direction.y, 0, 'f', 2)
+            .arg(node.direction.direction.z, 0, 'f', 2);
+    case renderer::parametric_model::ParametricNodeKind::axis:
+        return QStringLiteral("origin(%1, %2, %3) dir(%4, %5, %6)")
+            .arg(node.axis.origin.x, 0, 'f', 2)
+            .arg(node.axis.origin.y, 0, 'f', 2)
+            .arg(node.axis.origin.z, 0, 'f', 2)
+            .arg(node.axis.direction.x, 0, 'f', 2)
+            .arg(node.axis.direction.y, 0, 'f', 2)
+            .arg(node.axis.direction.z, 0, 'f', 2);
+    case renderer::parametric_model::ParametricNodeKind::plane:
+        return QStringLiteral("origin(%1, %2, %3) normal(%4, %5, %6)")
+            .arg(node.plane.origin.x, 0, 'f', 2)
+            .arg(node.plane.origin.y, 0, 'f', 2)
+            .arg(node.plane.origin.z, 0, 'f', 2)
+            .arg(node.plane.normal.x, 0, 'f', 2)
+            .arg(node.plane.normal.y, 0, 'f', 2)
+            .arg(node.plane.normal.z, 0, 'f', 2);
+    case renderer::parametric_model::ParametricNodeKind::scalar:
+        return QStringLiteral("%1").arg(node.scalar.value, 0, 'f', 4);
     }
 
     return QStringLiteral("unknown");
@@ -611,6 +696,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(objectWidgets_[0], &SceneObjectControlWidget::boxCornerPointChanged, this, [this](float x, float y, float z) {
         emit boxCornerPointChanged(x, y, z);
     });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxCornerStartChanged, this, [this](float x, float y, float z) {
+        emit boxCornerStartChanged(x, y, z);
+    });
+    connect(objectWidgets_[0], &SceneObjectControlWidget::boxCornerEndChanged, this, [this](float x, float y, float z) {
+        emit boxCornerEndChanged(x, y, z);
+    });
     connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderConstructionModeChanged, this, [this](int mode) {
         emit cylinderConstructionModeChanged(mode);
     });
@@ -629,6 +720,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderRadiusPointChanged, this, [this](float x, float y, float z) {
         emit cylinderRadiusPointChanged(x, y, z);
     });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderAxisStartChanged, this, [this](float x, float y, float z) {
+        emit cylinderAxisStartChanged(x, y, z);
+    });
+    connect(objectWidgets_[1], &SceneObjectControlWidget::cylinderAxisEndChanged, this, [this](float x, float y, float z) {
+        emit cylinderAxisEndChanged(x, y, z);
+    });
     connect(objectWidgets_[2], &SceneObjectControlWidget::sphereRadiusChanged, this, [this](float radius) {
         emit sphereRadiusChanged(radius);
     });
@@ -646,6 +743,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     });
     connect(objectWidgets_[2], &SceneObjectControlWidget::sphereSurfacePointChanged, this, [this](float x, float y, float z) {
         emit sphereSurfacePointChanged(x, y, z);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereDiameterStartChanged, this, [this](float x, float y, float z) {
+        emit sphereDiameterStartChanged(x, y, z);
+    });
+    connect(objectWidgets_[2], &SceneObjectControlWidget::sphereDiameterEndChanged, this, [this](float x, float y, float z) {
+        emit sphereDiameterEndChanged(x, y, z);
     });
 
     lightingWidget_ = new LightingControlWidget(sceneTab.content);
@@ -756,6 +859,12 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     unitListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
     unitLayout->addWidget(unitListWidget_);
 
+    auto* unitEvaluationGroup = new QGroupBox("Unit Evaluation", parametricTab.content);
+    auto* unitEvaluationLayout = new QVBoxLayout(unitEvaluationGroup);
+    unitEvaluationListWidget_ = new QListWidget(unitEvaluationGroup);
+    unitEvaluationListWidget_->setSelectionMode(QAbstractItemView::NoSelection);
+    unitEvaluationLayout->addWidget(unitEvaluationListWidget_);
+
     auto* unitInputGroup = new QGroupBox("Unit Inputs", parametricTab.content);
     auto* unitInputLayout = new QVBoxLayout(unitInputGroup);
     unitInputListWidget_ = new QListWidget(unitInputGroup);
@@ -806,6 +915,7 @@ ViewerControlPanel::ViewerControlPanel(QWidget* parent)
     parametricTab.contentLayout->addWidget(parametricBoundsGroup);
     parametricTab.contentLayout->addWidget(overlayGroup);
     parametricTab.contentLayout->addWidget(unitGroup);
+    parametricTab.contentLayout->addWidget(unitEvaluationGroup);
     parametricTab.contentLayout->addWidget(unitInputGroup);
     parametricTab.contentLayout->addWidget(nodeUsageGroup);
     parametricTab.contentLayout->addWidget(constructionLinkGroup);
@@ -992,12 +1102,11 @@ void ViewerControlPanel::refreshNodeExplorer() {
         const auto& node = objectState->nodes[static_cast<std::size_t>(row)];
         const auto usageSummary = nodeUsageSummary(*objectState, node.id);
         auto* item = new QListWidgetItem(
-            QStringLiteral("Point [id:%1]%2  (%3, %4, %5)")
+            QStringLiteral("%1 [id:%2]%3  %4")
+                .arg(nodeKindText(node.kind))
                 .arg(node.id)
                 .arg(!usageSummary.isEmpty() ? QStringLiteral("  [%1]").arg(usageSummary) : QString())
-                .arg(node.point.position.x, 0, 'f', 2)
-                .arg(node.point.position.y, 0, 'f', 2)
-                .arg(node.point.position.z, 0, 'f', 2),
+                .arg(nodeValueText(node)),
             nodeListWidget_);
         item->setData(Qt::UserRole, static_cast<uint>(node.id));
         if (node.id == inspectedNodeId_) {
@@ -1027,13 +1136,15 @@ void ViewerControlPanel::refreshNodeInspector() {
     const QSignalBlocker xBlocker(nodeXSpinBox_);
     const QSignalBlocker yBlocker(nodeYSpinBox_);
     const QSignalBlocker zBlocker(nodeZSpinBox_);
-    const bool hasNode = selectedNode != nullptr;
-    nodeXSpinBox_->setEnabled(hasNode);
-    nodeYSpinBox_->setEnabled(hasNode);
-    nodeZSpinBox_->setEnabled(hasNode);
-    nodeXSpinBox_->setValue(hasNode ? selectedNode->point.position.x : 0.0);
-    nodeYSpinBox_->setValue(hasNode ? selectedNode->point.position.y : 0.0);
-    nodeZSpinBox_->setValue(hasNode ? selectedNode->point.position.z : 0.0);
+    const bool hasEditablePointNode =
+        selectedNode != nullptr
+        && selectedNode->kind == renderer::parametric_model::ParametricNodeKind::point;
+    nodeXSpinBox_->setEnabled(hasEditablePointNode);
+    nodeYSpinBox_->setEnabled(hasEditablePointNode);
+    nodeZSpinBox_->setEnabled(hasEditablePointNode);
+    nodeXSpinBox_->setValue(hasEditablePointNode ? selectedNode->point.position.x : 0.0);
+    nodeYSpinBox_->setValue(hasEditablePointNode ? selectedNode->point.position.y : 0.0);
+    nodeZSpinBox_->setValue(hasEditablePointNode ? selectedNode->point.position.z : 0.0);
 }
 
 void ViewerControlPanel::refreshObjectInspector() {
@@ -1091,6 +1202,7 @@ void ViewerControlPanel::refreshParametricDebugPage() {
     if (evaluationSummaryLabel_ == nullptr
         || parametricBoundsListWidget_ == nullptr
         || unitListWidget_ == nullptr
+        || unitEvaluationListWidget_ == nullptr
         || unitInputListWidget_ == nullptr
         || nodeUsageListWidget_ == nullptr
         || constructionLinkListWidget_ == nullptr
@@ -1125,6 +1237,24 @@ void ViewerControlPanel::refreshParametricDebugPage() {
                     .arg(unit.featureId)
                     .arg(unitKindText(unit.kind))
                     .arg(constructionKindText(unit.constructionKind)));
+        }
+    }
+
+    const QSignalBlocker unitEvaluationBlocker(unitEvaluationListWidget_);
+    unitEvaluationListWidget_->clear();
+    if (objectState != nullptr) {
+        if (objectState->unitEvaluations.empty()) {
+            unitEvaluationListWidget_->addItem(QStringLiteral("No unit evaluations"));
+        }
+        for (const auto& evaluation : objectState->unitEvaluations) {
+            unitEvaluationListWidget_->addItem(
+                QStringLiteral("unit:%1  feature:%2  [%3]\ndiagnostics:%4  warnings:%5  errors:%6")
+                    .arg(evaluation.unitId)
+                    .arg(evaluation.featureId)
+                    .arg(unitEvaluationStatusText(evaluation.status))
+                    .arg(evaluation.diagnosticCount)
+                    .arg(evaluation.warningCount)
+                    .arg(evaluation.errorCount));
         }
     }
 

@@ -63,6 +63,48 @@ ParametricNodeDescriptor PrimitiveFactory::makePointNode(
     return node;
 }
 
+ParametricNodeDescriptor PrimitiveFactory::makeDirectionNode(
+    const scene_contract::Vec3f& direction)
+{
+    ParametricNodeDescriptor node;
+    node.id = nextParametricNodeId();
+    node.kind = ParametricNodeKind::direction;
+    node.direction.direction = direction;
+    return node;
+}
+
+ParametricNodeDescriptor PrimitiveFactory::makeAxisNode(
+    const scene_contract::Vec3f& origin,
+    const scene_contract::Vec3f& direction)
+{
+    ParametricNodeDescriptor node;
+    node.id = nextParametricNodeId();
+    node.kind = ParametricNodeKind::axis;
+    node.axis.origin = origin;
+    node.axis.direction = direction;
+    return node;
+}
+
+ParametricNodeDescriptor PrimitiveFactory::makePlaneNode(
+    const scene_contract::Vec3f& origin,
+    const scene_contract::Vec3f& normal)
+{
+    ParametricNodeDescriptor node;
+    node.id = nextParametricNodeId();
+    node.kind = ParametricNodeKind::plane;
+    node.plane.origin = origin;
+    node.plane.normal = normal;
+    return node;
+}
+
+ParametricNodeDescriptor PrimitiveFactory::makeScalarNode(float value) {
+    ParametricNodeDescriptor node;
+    node.id = nextParametricNodeId();
+    node.kind = ParametricNodeKind::scalar;
+    node.scalar.value = value;
+    return node;
+}
+
 PrimitiveDescriptor PrimitiveFactory::makeBoxDescriptor(
     float width,
     float height,
@@ -177,6 +219,27 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricBoxFromCenterCornerPo
     return descriptor;
 }
 
+ParametricObjectDescriptor PrimitiveFactory::makeParametricBoxFromCornerPoints(
+    const scene_contract::Vec3f& cornerStart,
+    const scene_contract::Vec3f& cornerEnd)
+{
+    const float width = std::abs(cornerEnd.x - cornerStart.x);
+    const float height = std::abs(cornerEnd.y - cornerStart.y);
+    const float depth = std::abs(cornerEnd.z - cornerStart.z);
+    auto descriptor = makeParametricObject(makeBoxDescriptor(width, height, depth));
+    auto startNode = makePointNode(cornerStart);
+    auto endNode = makePointNode(cornerEnd);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.box.constructionMode = BoxSpec::ConstructionMode::corner_points;
+        primitiveFeature->primitive.box.cornerStart = {startNode.id};
+        primitiveFeature->primitive.box.cornerEnd = {endNode.id};
+    }
+    descriptor.nodes.push_back(startNode);
+    descriptor.nodes.push_back(endNode);
+    return descriptor;
+}
+
 ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromCenterRadiusHeight(
     const scene_contract::Vec3f& center,
     float radius,
@@ -215,6 +278,27 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromCenterRad
     return descriptor;
 }
 
+ParametricObjectDescriptor PrimitiveFactory::makeParametricCylinderFromAxisEndpointsRadius(
+    const scene_contract::Vec3f& axisStart,
+    const scene_contract::Vec3f& axisEnd,
+    float radius,
+    std::uint32_t segments)
+{
+    const float height = lengthVec3(subtractVec3(axisEnd, axisStart));
+    auto descriptor = makeParametricObject(makeCylinderDescriptor(radius, height, segments));
+    auto startNode = makePointNode(axisStart);
+    auto endNode = makePointNode(axisEnd);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.cylinder.constructionMode = CylinderSpec::ConstructionMode::axis_endpoints_radius;
+        primitiveFeature->primitive.cylinder.axisStart = {startNode.id};
+        primitiveFeature->primitive.cylinder.axisEnd = {endNode.id};
+    }
+    descriptor.nodes.push_back(startNode);
+    descriptor.nodes.push_back(endNode);
+    return descriptor;
+}
+
 ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromCenterRadius(
     const scene_contract::Vec3f& center,
     float radius,
@@ -250,6 +334,27 @@ ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromCenterSurfa
     }
     descriptor.nodes.push_back(centerNode);
     descriptor.nodes.push_back(surfaceNode);
+    return descriptor;
+}
+
+ParametricObjectDescriptor PrimitiveFactory::makeParametricSphereFromDiameterPoints(
+    const scene_contract::Vec3f& diameterStart,
+    const scene_contract::Vec3f& diameterEnd,
+    std::uint32_t slices,
+    std::uint32_t stacks)
+{
+    const float radius = lengthVec3(subtractVec3(diameterEnd, diameterStart)) * 0.5F;
+    auto descriptor = makeParametricObject(makeSphereDescriptor(radius, slices, stacks));
+    auto startNode = makePointNode(diameterStart);
+    auto endNode = makePointNode(diameterEnd);
+    auto* primitiveFeature = descriptor.features.empty() ? nullptr : &descriptor.features.front();
+    if (primitiveFeature != nullptr && primitiveFeature->kind == FeatureKind::primitive) {
+        primitiveFeature->primitive.sphere.constructionMode = SphereSpec::ConstructionMode::diameter_points;
+        primitiveFeature->primitive.sphere.diameterStart = {startNode.id};
+        primitiveFeature->primitive.sphere.diameterEnd = {endNode.id};
+    }
+    descriptor.nodes.push_back(startNode);
+    descriptor.nodes.push_back(endNode);
     return descriptor;
 }
 

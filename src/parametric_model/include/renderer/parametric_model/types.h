@@ -23,17 +23,43 @@ struct NodeReference {
 };
 
 enum class ParametricNodeKind : std::uint8_t {
-    point
+    point,
+    direction,
+    axis,
+    plane,
+    scalar
 };
 
 struct PointNodeDescriptor {
     scene_contract::Vec3f position {};
 };
 
+struct DirectionNodeDescriptor {
+    scene_contract::Vec3f direction {0.0F, 1.0F, 0.0F};
+};
+
+struct AxisNodeDescriptor {
+    scene_contract::Vec3f origin {};
+    scene_contract::Vec3f direction {0.0F, 1.0F, 0.0F};
+};
+
+struct PlaneNodeDescriptor {
+    scene_contract::Vec3f origin {};
+    scene_contract::Vec3f normal {0.0F, 1.0F, 0.0F};
+};
+
+struct ScalarNodeDescriptor {
+    float value = 0.0F;
+};
+
 struct ParametricNodeDescriptor {
     ParametricNodeId id = 0U;
     ParametricNodeKind kind = ParametricNodeKind::point;
     PointNodeDescriptor point {};
+    DirectionNodeDescriptor direction {};
+    AxisNodeDescriptor axis {};
+    PlaneNodeDescriptor plane {};
+    ScalarNodeDescriptor scalar {};
 };
 
 struct BoxSpec {
@@ -42,9 +68,12 @@ struct BoxSpec {
     float depth = 1.0F;
     NodeReference center {};
     NodeReference cornerPoint {};
+    NodeReference cornerStart {};
+    NodeReference cornerEnd {};
     enum class ConstructionMode : std::uint8_t {
         center_size,
-        center_corner_point
+        center_corner_point,
+        corner_points
     };
     ConstructionMode constructionMode = ConstructionMode::center_size;
 };
@@ -55,9 +84,12 @@ struct CylinderSpec {
     std::uint32_t segments = 24U;
     NodeReference center {};
     NodeReference radiusPoint {};
+    NodeReference axisStart {};
+    NodeReference axisEnd {};
     enum class ConstructionMode : std::uint8_t {
         center_radius_height,
-        center_radius_point_height
+        center_radius_point_height,
+        axis_endpoints_radius
     };
     ConstructionMode constructionMode = ConstructionMode::center_radius_height;
 };
@@ -68,11 +100,14 @@ struct SphereSpec {
     std::uint32_t stacks = 16U;
     enum class ConstructionMode : std::uint8_t {
         center_radius,
-        center_surface_point
+        center_surface_point,
+        diameter_points
     };
     ConstructionMode constructionMode = ConstructionMode::center_radius;
     NodeReference center {};
     NodeReference surfacePoint {};
+    NodeReference diameterStart {};
+    NodeReference diameterEnd {};
 };
 
 struct PrimitiveDescriptor {
@@ -118,10 +153,13 @@ enum class ParametricUnitRole : std::uint8_t {
 enum class ParametricConstructionKind : std::uint8_t {
     box_center_size,
     box_center_corner_point,
+    box_corner_points,
     cylinder_center_radius_height,
     cylinder_center_radius_point_height,
+    cylinder_axis_endpoints_radius,
     sphere_center_radius,
     sphere_center_surface_point,
+    sphere_diameter_points,
     mirror_axis_plane,
     linear_array_count_offset
 };
@@ -138,7 +176,13 @@ enum class ParametricInputSemantic : std::uint8_t {
     center,
     surface_point,
     corner_point,
+    corner_start,
+    corner_end,
     radius_point,
+    axis_start,
+    axis_end,
+    diameter_start,
+    diameter_end,
     width,
     height,
     depth,
@@ -216,6 +260,22 @@ struct ParametricDerivedParameterDescriptor {
     float value = 0.0F;
     ParametricNodeId referenceNodeId = 0U;
     ParametricNodeId sourceNodeId = 0U;
+};
+
+enum class ParametricUnitEvaluationStatus : std::uint8_t {
+    valid,
+    warning,
+    error,
+    skipped
+};
+
+struct ParametricUnitEvaluationDescriptor {
+    ParametricUnitId unitId = 0U;
+    ParametricFeatureId featureId = 0U;
+    ParametricUnitEvaluationStatus status = ParametricUnitEvaluationStatus::valid;
+    std::uint32_t diagnosticCount = 0U;
+    std::uint32_t warningCount = 0U;
+    std::uint32_t errorCount = 0U;
 };
 
 }  // namespace renderer::parametric_model
