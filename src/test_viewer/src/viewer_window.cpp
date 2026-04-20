@@ -24,10 +24,14 @@
 #include "renderer/parametric_model/model_structure.h"
 #include "renderer/parametric_model/parametric_evaluator.h"
 #include "renderer/parametric_model/primitive_factory.h"
+#include "parametric_model_add_adapter.h"
+#include "parametric_ui_schema_adapter.h"
+#include "viewer_ui_state_adapter.h"
 
 namespace {
 
 constexpr std::size_t kDefaultSceneObjectCount = 3;
+constexpr std::size_t kMaxOperationLogCount = 300;
 constexpr int kDefaultWindowWidth = 1240;
 constexpr int kDefaultWindowHeight = 680;
 
@@ -37,14 +41,14 @@ struct SceneObjectDefaults {
     float offsetY = 0.0F;
     float offsetZ = 0.0F;
     float scale = 1.0F;
-    float rotationSpeed = 1.0F;
+    float rotationSpeed = 0.0F;
     bool visible = true;
 };
 
 const std::array<SceneObjectDefaults, kDefaultSceneObjectCount> kDefaultSceneObjects = {{
-    {{0.15F, 0.55F, 0.85F, 1.0F}, -2.0F, 0.0F, 0.0F, 0.95F, 1.0F, true},
-    {{0.92F, 0.54F, 0.21F, 1.0F}, 0.0F, 0.1F, 0.0F, 1.0F, -0.8F, true},
-    {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 1.25F, true}
+    {{0.15F, 0.55F, 0.85F, 1.0F}, -2.0F, 0.0F, 0.0F, 0.95F, 0.0F, true},
+    {{0.92F, 0.54F, 0.21F, 1.0F}, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, true},
+    {{0.32F, 0.82F, 0.56F, 1.0F}, 2.0F, 0.05F, 0.0F, 0.9F, 0.0F, true}
 }};
 
 renderer::parametric_model::PrimitiveDescriptor makeDefaultPrimitiveDescriptor(
@@ -87,7 +91,7 @@ SceneObjectDefaults makeDynamicSceneObjectDefaults(
     defaults.offsetY = kind == renderer::parametric_model::PrimitiveKind::cylinder ? 0.1F : 0.0F;
     defaults.offsetZ = static_cast<float>(row) * 1.8F;
     defaults.scale = kind == renderer::parametric_model::PrimitiveKind::sphere ? 0.9F : 1.0F;
-    defaults.rotationSpeed = 0.9F + static_cast<float>(index % 5U) * 0.2F;
+    defaults.rotationSpeed = 0.0F;
     defaults.visible = true;
     return defaults;
 }
@@ -206,6 +210,234 @@ renderer::scene_contract::Vec3f midpoint(
         (left.y + right.y) * 0.5F,
         (left.z + right.z) * 0.5F
     };
+}
+
+const renderer::parametric_model::ParametricNodeDescriptor* findDescriptorPointNode(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::ParametricNodeId nodeId)
+{
+    for (const auto& node : descriptor.nodes) {
+        if (node.id == nodeId && node.kind == renderer::parametric_model::ParametricNodeKind::point) {
+            return &node;
+        }
+    }
+    return nullptr;
+}
+
+renderer::scene_contract::Vec3f resolveDescriptorPointNode(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    renderer::parametric_model::NodeReference reference,
+    const renderer::scene_contract::Vec3f& fallback)
+{
+    const auto* node = findDescriptorPointNode(descriptor, reference.id);
+    return node != nullptr ? node->point.position : fallback;
+}
+
+renderer::scene_contract::Vec3f primitivePivot(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    const renderer::parametric_model::FeatureDescriptor& feature)
+{
+    if (feature.kind != renderer::parametric_model::FeatureKind::primitive) {
+        return descriptor.metadata.pivot;
+    }
+
+    switch (feature.primitive.kind) {
+    case renderer::parametric_model::PrimitiveKind::box: {
+        const auto& box = feature.primitive.box;
+        if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::corner_points) {
+            return midpoint(
+                resolveDescriptorPointNode(descriptor, box.cornerStart, descriptor.metadata.pivot),
+                resolveDescriptorPointNode(descriptor, box.cornerEnd, descriptor.metadata.pivot));
+        }
+        return resolveDescriptorPointNode(descriptor, box.center, descriptor.metadata.pivot);
+    }
+    case renderer::parametric_model::PrimitiveKind::cylinder: {
+        const auto& cylinder = feature.primitive.cylinder;
+        if (cylinder.constructionMode
+            == renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius) {
+            return midpoint(
+                resolveDescriptorPointNode(descriptor, cylinder.axisStart, descriptor.metadata.pivot),
+                resolveDescriptorPointNode(descriptor, cylinder.axisEnd, descriptor.metadata.pivot));
+        }
+        return resolveDescriptorPointNode(descriptor, cylinder.center, descriptor.metadata.pivot);
+    }
+    case renderer::parametric_model::PrimitiveKind::sphere: {
+        const auto& sphere = feature.primitive.sphere;
+        if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points) {
+            return midpoint(
+                resolveDescriptorPointNode(descriptor, sphere.diameterStart, descriptor.metadata.pivot),
+                resolveDescriptorPointNode(descriptor, sphere.diameterEnd, descriptor.metadata.pivot));
+        }
+        return resolveDescriptorPointNode(descriptor, sphere.center, descriptor.metadata.pivot);
+    }
+    }
+
+    return descriptor.metadata.pivot;
+}
+
+renderer::scene_contract::Vec3f parametricObjectPivot(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    for (const auto& feature : descriptor.features) {
+        if (feature.kind == renderer::parametric_model::FeatureKind::primitive) {
+            return primitivePivot(descriptor, feature);
+        }
+    }
+    return descriptor.metadata.pivot;
+}
+
+ViewerControlPanel::SceneObjectPanelState makePanelSceneObjectState(
+    const viewer_ui::SceneObjectUiState& uiState)
+{
+    ViewerControlPanel::SceneObjectPanelState panelState;
+    panelState.id = uiState.id;
+    panelState.primitiveKind = uiState.primitiveKind;
+    panelState.primitive = uiState.primitive;
+    panelState.nodes = uiState.nodes;
+    panelState.visible = uiState.visible;
+    panelState.rotationSpeed = uiState.rotationSpeed;
+    panelState.color = uiState.color;
+    panelState.bounds = uiState.bounds;
+    panelState.mirror.enabled = uiState.mirror.enabled;
+    panelState.mirror.axis = uiState.mirror.axis;
+    panelState.mirror.planeOffset = uiState.mirror.planeOffset;
+    panelState.linearArray.enabled = uiState.linearArray.enabled;
+    panelState.linearArray.count = uiState.linearArray.count;
+    panelState.linearArray.offset = uiState.linearArray.offset;
+
+    panelState.features.reserve(uiState.features.size());
+    for (const auto& feature : uiState.features) {
+        panelState.features.push_back({
+            feature.id,
+            feature.unitId,
+            feature.kind,
+            feature.enabled
+        });
+    }
+
+    panelState.units.reserve(uiState.units.size());
+    for (const auto& unit : uiState.units) {
+        panelState.units.push_back({
+            unit.id,
+            unit.featureId,
+            unit.kind,
+            unit.role,
+            unit.constructionKind,
+            unit.enabled
+        });
+    }
+
+    panelState.unitEvaluations.reserve(uiState.unitEvaluations.size());
+    for (const auto& evaluation : uiState.unitEvaluations) {
+        panelState.unitEvaluations.push_back({
+            evaluation.unitId,
+            evaluation.featureId,
+            evaluation.status,
+            evaluation.diagnosticCount,
+            evaluation.warningCount,
+            evaluation.errorCount
+        });
+    }
+
+    panelState.unitInputs.reserve(uiState.unitInputs.size());
+    for (const auto& input : uiState.unitInputs) {
+        panelState.unitInputs.push_back({
+            input.unitId,
+            input.featureId,
+            input.kind,
+            input.semantic,
+            input.nodeId
+        });
+    }
+
+    panelState.nodeUsages.reserve(uiState.nodeUsages.size());
+    for (const auto& usage : uiState.nodeUsages) {
+        panelState.nodeUsages.push_back({
+            usage.nodeId,
+            usage.unitId,
+            usage.featureId,
+            usage.semantic
+        });
+    }
+
+    panelState.constructionLinks.reserve(uiState.constructionLinks.size());
+    for (const auto& link : uiState.constructionLinks) {
+        panelState.constructionLinks.push_back({
+            link.unitId,
+            link.featureId,
+            link.constructionKind,
+            link.startNodeId,
+            link.endNodeId,
+            link.startSemantic,
+            link.endSemantic
+        });
+    }
+
+    panelState.derivedParameters.reserve(uiState.derivedParameters.size());
+    for (const auto& parameter : uiState.derivedParameters) {
+        panelState.derivedParameters.push_back({
+            parameter.unitId,
+            parameter.featureId,
+            parameter.constructionKind,
+            parameter.semantic,
+            parameter.value,
+            parameter.referenceNodeId,
+            parameter.sourceNodeId
+        });
+    }
+
+    panelState.evaluationDiagnostics.reserve(uiState.evaluationDiagnostics.size());
+    for (const auto& diagnostic : uiState.evaluationDiagnostics) {
+        panelState.evaluationDiagnostics.push_back({
+            diagnostic.severity,
+            diagnostic.code,
+            diagnostic.featureId,
+            diagnostic.nodeId,
+            diagnostic.message
+        });
+    }
+
+    panelState.evaluationSummary.succeeded = uiState.evaluationSummary.succeeded;
+    panelState.evaluationSummary.vertexCount = uiState.evaluationSummary.vertexCount;
+    panelState.evaluationSummary.indexCount = uiState.evaluationSummary.indexCount;
+    panelState.evaluationSummary.diagnosticCount = uiState.evaluationSummary.diagnosticCount;
+    panelState.evaluationSummary.warningCount = uiState.evaluationSummary.warningCount;
+    panelState.evaluationSummary.errorCount = uiState.evaluationSummary.errorCount;
+    return panelState;
+}
+
+void appendPanelFeatureFields(
+    ViewerControlPanel::SceneObjectPanelState& panelState,
+    const std::vector<viewer_ui::ParametricFeatureFieldsUiState>& featureFields)
+{
+    panelState.featureFields.reserve(featureFields.size());
+    for (const auto& featureFieldGroup : featureFields) {
+        ViewerControlPanel::FeatureFieldsPanelState panelFeatureFields;
+        panelFeatureFields.featureId = featureFieldGroup.featureId;
+        panelFeatureFields.unitId = featureFieldGroup.unitId;
+        panelFeatureFields.featureKind = featureFieldGroup.featureKind;
+        panelFeatureFields.constructionKind = featureFieldGroup.constructionKind;
+        panelFeatureFields.constructionLabel = featureFieldGroup.constructionLabel;
+        panelFeatureFields.enabled = featureFieldGroup.enabled;
+        panelFeatureFields.fields.reserve(featureFieldGroup.fields.size());
+
+        for (const auto& field : featureFieldGroup.fields) {
+            panelFeatureFields.fields.push_back({
+                field.kind,
+                field.semantic,
+                field.label,
+                field.editable,
+                field.nodeId,
+                field.hasNodePosition,
+                field.vectorValue,
+                field.floatValue,
+                field.integerValue,
+                field.enumValue
+            });
+        }
+
+        panelState.featureFields.push_back(panelFeatureFields);
+    }
 }
 
 const std::array<renderer::parametric_model::ParametricObjectDescriptor, kDefaultSceneObjectCount> kDefaultParametricObjects = {{
@@ -336,6 +568,13 @@ struct ProjectedPoint {
     bool visible = false;
 };
 
+struct ProjectedVertex {
+    QPointF screen;
+    float ndcDepth = 1.0F;
+    float clipW = 1.0F;
+    bool visible = false;
+};
+
 renderer::scene_contract::Vec4f transformPoint4(
     const renderer::scene_contract::Mat4f& matrix,
     const renderer::scene_contract::Vec3f& point)
@@ -347,6 +586,14 @@ renderer::scene_contract::Vec4f transformPoint4(
         matrix.elements[3] * point.x + matrix.elements[7] * point.y + matrix.elements[11] * point.z + matrix.elements[15]
     };
 }
+
+renderer::scene_contract::Vec4f transformVec4(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec4f& value);
+
+bool invertMatrix4(
+    const renderer::scene_contract::Mat4f& matrix,
+    renderer::scene_contract::Mat4f& inverse);
 
 ProjectedPoint projectWorldPoint(
     const renderer::scene_contract::CameraData& camera,
@@ -373,6 +620,61 @@ ProjectedPoint projectWorldPoint(
     };
     projected.visible = true;
     return projected;
+}
+
+ProjectedVertex projectClipVertexToScreen(
+    const renderer::scene_contract::Vec4f& clip,
+    int viewportWidth,
+    int viewportHeight)
+{
+    ProjectedVertex projected;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+        return projected;
+    }
+    if (std::abs(clip.w) <= kViewportZoomRayEpsilon || clip.w < 0.0F) {
+        return projected;
+    }
+
+    const float ndcX = clip.x / clip.w;
+    const float ndcY = clip.y / clip.w;
+    projected.ndcDepth = clip.z / clip.w;
+    projected.clipW = clip.w;
+    projected.screen = {
+        (ndcX * 0.5F + 0.5F) * static_cast<float>(viewportWidth),
+        (1.0F - (ndcY * 0.5F + 0.5F)) * static_cast<float>(viewportHeight)
+    };
+    projected.visible = true;
+    return projected;
+}
+
+float signedTriangleArea2D(const QPointF& left, const QPointF& right, const QPointF& point) {
+    return static_cast<float>(
+        (right.x() - left.x()) * (point.y() - left.y()) -
+        (right.y() - left.y()) * (point.x() - left.x()));
+}
+
+bool pointInProjectedTriangle(
+    const QPointF& point,
+    const ProjectedVertex& vertex0,
+    const ProjectedVertex& vertex1,
+    const ProjectedVertex& vertex2,
+    float& barycentric0,
+    float& barycentric1,
+    float& barycentric2)
+{
+    const float area = signedTriangleArea2D(vertex0.screen, vertex1.screen, vertex2.screen);
+    if (std::abs(area) <= kViewportZoomRayEpsilon) {
+        return false;
+    }
+
+    barycentric0 = signedTriangleArea2D(vertex1.screen, vertex2.screen, point) / area;
+    barycentric1 = signedTriangleArea2D(vertex2.screen, vertex0.screen, point) / area;
+    barycentric2 = 1.0F - barycentric0 - barycentric1;
+
+    constexpr float kScreenPickTolerance = -0.0005F;
+    return barycentric0 >= kScreenPickTolerance
+        && barycentric1 >= kScreenPickTolerance
+        && barycentric2 >= kScreenPickTolerance;
 }
 
 const renderer::parametric_model::ParametricNodeUsageDescriptor* firstUsageForNode(
@@ -459,30 +761,37 @@ ViewportRay makeViewportRay(
     const float ndcY = 1.0F - normalizedY * 2.0F;
     const auto camera = cameraController.buildCameraData();
     const auto cameraFrame = makeCameraFrame(camera);
-    if (std::abs(camera.projection.elements[0]) <= kViewportZoomRayEpsilon
-        || std::abs(camera.projection.elements[5]) <= kViewportZoomRayEpsilon) {
+    const auto viewProjection = renderer::scene_contract::math::multiply(camera.projection, camera.view);
+    renderer::scene_contract::Mat4f inverseViewProjection {};
+    if (!invertMatrix4(viewProjection, inverseViewProjection)) {
         return ray;
     }
 
-    ray.origin = cameraFrame.position;
-    ray.direction = cameraFrame.forward;
     ray.cameraForward = cameraFrame.forward;
-
-    if (cameraController.projectionMode() == OrbitCameraController::ProjectionMode::perspective) {
-        const auto horizontalOffset = scaleVec3(cameraFrame.right, ndcX / camera.projection.elements[0]);
-        const auto verticalOffset = scaleVec3(cameraFrame.up, ndcY / camera.projection.elements[5]);
-        ray.direction = renderer::scene_contract::math::normalize(
-            renderer::scene_contract::math::add(
-                cameraFrame.forward,
-                renderer::scene_contract::math::add(horizontalOffset, verticalOffset)));
-    } else {
-        ray.origin = renderer::scene_contract::math::add(
-            ray.origin,
-            renderer::scene_contract::math::add(
-                scaleVec3(cameraFrame.right, ndcX / camera.projection.elements[0]),
-                scaleVec3(cameraFrame.up, ndcY / camera.projection.elements[5])));
+    const auto nearClip = transformVec4(inverseViewProjection, {ndcX, ndcY, -1.0F, 1.0F});
+    const auto farClip = transformVec4(inverseViewProjection, {ndcX, ndcY, 1.0F, 1.0F});
+    if (std::abs(nearClip.w) <= kViewportZoomRayEpsilon || std::abs(farClip.w) <= kViewportZoomRayEpsilon) {
+        return ray;
     }
 
+    const renderer::scene_contract::Vec3f nearWorld {
+        nearClip.x / nearClip.w,
+        nearClip.y / nearClip.w,
+        nearClip.z / nearClip.w
+    };
+    const renderer::scene_contract::Vec3f farWorld {
+        farClip.x / farClip.w,
+        farClip.y / farClip.w,
+        farClip.z / farClip.w
+    };
+
+    if (cameraController.projectionMode() == OrbitCameraController::ProjectionMode::perspective) {
+        ray.origin = camera.position;
+    } else {
+        ray.origin = nearWorld;
+    }
+    ray.direction = renderer::scene_contract::math::normalize(
+        renderer::scene_contract::math::subtract(farWorld, nearWorld));
     ray.valid = renderer::scene_contract::math::length(ray.direction) > kViewportZoomRayEpsilon;
     return ray;
 }
@@ -540,6 +849,486 @@ renderer::scene_contract::Vec3f transformPoint(
         matrix.elements[1] * point.x + matrix.elements[5] * point.y + matrix.elements[9] * point.z + matrix.elements[13],
         matrix.elements[2] * point.x + matrix.elements[6] * point.y + matrix.elements[10] * point.z + matrix.elements[14]
     };
+}
+
+renderer::scene_contract::Vec4f transformVec4(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec4f& value)
+{
+    return {
+        matrix.elements[0] * value.x + matrix.elements[4] * value.y + matrix.elements[8] * value.z + matrix.elements[12] * value.w,
+        matrix.elements[1] * value.x + matrix.elements[5] * value.y + matrix.elements[9] * value.z + matrix.elements[13] * value.w,
+        matrix.elements[2] * value.x + matrix.elements[6] * value.y + matrix.elements[10] * value.z + matrix.elements[14] * value.w,
+        matrix.elements[3] * value.x + matrix.elements[7] * value.y + matrix.elements[11] * value.z + matrix.elements[15] * value.w
+    };
+}
+
+bool invertMatrix4(
+    const renderer::scene_contract::Mat4f& matrix,
+    renderer::scene_contract::Mat4f& inverse)
+{
+    const float* m = matrix.elements;
+    float inv[16] {};
+
+    inv[0] = m[5] * m[10] * m[15] -
+        m[5] * m[11] * m[14] -
+        m[9] * m[6] * m[15] +
+        m[9] * m[7] * m[14] +
+        m[13] * m[6] * m[11] -
+        m[13] * m[7] * m[10];
+
+    inv[4] = -m[4] * m[10] * m[15] +
+        m[4] * m[11] * m[14] +
+        m[8] * m[6] * m[15] -
+        m[8] * m[7] * m[14] -
+        m[12] * m[6] * m[11] +
+        m[12] * m[7] * m[10];
+
+    inv[8] = m[4] * m[9] * m[15] -
+        m[4] * m[11] * m[13] -
+        m[8] * m[5] * m[15] +
+        m[8] * m[7] * m[13] +
+        m[12] * m[5] * m[11] -
+        m[12] * m[7] * m[9];
+
+    inv[12] = -m[4] * m[9] * m[14] +
+        m[4] * m[10] * m[13] +
+        m[8] * m[5] * m[14] -
+        m[8] * m[6] * m[13] -
+        m[12] * m[5] * m[10] +
+        m[12] * m[6] * m[9];
+
+    inv[1] = -m[1] * m[10] * m[15] +
+        m[1] * m[11] * m[14] +
+        m[9] * m[2] * m[15] -
+        m[9] * m[3] * m[14] -
+        m[13] * m[2] * m[11] +
+        m[13] * m[3] * m[10];
+
+    inv[5] = m[0] * m[10] * m[15] -
+        m[0] * m[11] * m[14] -
+        m[8] * m[2] * m[15] +
+        m[8] * m[3] * m[14] +
+        m[12] * m[2] * m[11] -
+        m[12] * m[3] * m[10];
+
+    inv[9] = -m[0] * m[9] * m[15] +
+        m[0] * m[11] * m[13] +
+        m[8] * m[1] * m[15] -
+        m[8] * m[3] * m[13] -
+        m[12] * m[1] * m[11] +
+        m[12] * m[3] * m[9];
+
+    inv[13] = m[0] * m[9] * m[14] -
+        m[0] * m[10] * m[13] -
+        m[8] * m[1] * m[14] +
+        m[8] * m[2] * m[13] +
+        m[12] * m[1] * m[10] -
+        m[12] * m[2] * m[9];
+
+    inv[2] = m[1] * m[6] * m[15] -
+        m[1] * m[7] * m[14] -
+        m[5] * m[2] * m[15] +
+        m[5] * m[3] * m[14] +
+        m[13] * m[2] * m[7] -
+        m[13] * m[3] * m[6];
+
+    inv[6] = -m[0] * m[6] * m[15] +
+        m[0] * m[7] * m[14] +
+        m[4] * m[2] * m[15] -
+        m[4] * m[3] * m[14] -
+        m[12] * m[2] * m[7] +
+        m[12] * m[3] * m[6];
+
+    inv[10] = m[0] * m[5] * m[15] -
+        m[0] * m[7] * m[13] -
+        m[4] * m[1] * m[15] +
+        m[4] * m[3] * m[13] +
+        m[12] * m[1] * m[7] -
+        m[12] * m[3] * m[5];
+
+    inv[14] = -m[0] * m[5] * m[14] +
+        m[0] * m[6] * m[13] +
+        m[4] * m[1] * m[14] -
+        m[4] * m[2] * m[13] -
+        m[12] * m[1] * m[6] +
+        m[12] * m[2] * m[5];
+
+    inv[3] = -m[1] * m[6] * m[11] +
+        m[1] * m[7] * m[10] +
+        m[5] * m[2] * m[11] -
+        m[5] * m[3] * m[10] -
+        m[9] * m[2] * m[7] +
+        m[9] * m[3] * m[6];
+
+    inv[7] = m[0] * m[6] * m[11] -
+        m[0] * m[7] * m[10] -
+        m[4] * m[2] * m[11] +
+        m[4] * m[3] * m[10] +
+        m[8] * m[2] * m[7] -
+        m[8] * m[3] * m[6];
+
+    inv[11] = -m[0] * m[5] * m[11] +
+        m[0] * m[7] * m[9] +
+        m[4] * m[1] * m[11] -
+        m[4] * m[3] * m[9] -
+        m[8] * m[1] * m[7] +
+        m[8] * m[3] * m[5];
+
+    inv[15] = m[0] * m[5] * m[10] -
+        m[0] * m[6] * m[9] -
+        m[4] * m[1] * m[10] +
+        m[4] * m[2] * m[9] +
+        m[8] * m[1] * m[6] -
+        m[8] * m[2] * m[5];
+
+    const float determinant = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (std::abs(determinant) <= kViewportZoomRayEpsilon) {
+        return false;
+    }
+
+    const float inverseDeterminant = 1.0F / determinant;
+    for (int index = 0; index < 16; ++index) {
+        inverse.elements[index] = inv[index] * inverseDeterminant;
+    }
+    return true;
+}
+
+renderer::scene_contract::Vec3f transformVector(
+    const renderer::scene_contract::Mat4f& matrix,
+    const renderer::scene_contract::Vec3f& vector)
+{
+    return {
+        matrix.elements[0] * vector.x + matrix.elements[4] * vector.y + matrix.elements[8] * vector.z,
+        matrix.elements[1] * vector.x + matrix.elements[5] * vector.y + matrix.elements[9] * vector.z,
+        matrix.elements[2] * vector.x + matrix.elements[6] * vector.y + matrix.elements[10] * vector.z
+    };
+}
+
+renderer::scene_contract::Mat4f invertAffineTransform(const renderer::scene_contract::Mat4f& matrix) {
+    const float a00 = matrix.elements[0];
+    const float a01 = matrix.elements[4];
+    const float a02 = matrix.elements[8];
+    const float a10 = matrix.elements[1];
+    const float a11 = matrix.elements[5];
+    const float a12 = matrix.elements[9];
+    const float a20 = matrix.elements[2];
+    const float a21 = matrix.elements[6];
+    const float a22 = matrix.elements[10];
+
+    const float cofactor00 = a11 * a22 - a12 * a21;
+    const float cofactor01 = a02 * a21 - a01 * a22;
+    const float cofactor02 = a01 * a12 - a02 * a11;
+    const float cofactor10 = a12 * a20 - a10 * a22;
+    const float cofactor11 = a00 * a22 - a02 * a20;
+    const float cofactor12 = a02 * a10 - a00 * a12;
+    const float cofactor20 = a10 * a21 - a11 * a20;
+    const float cofactor21 = a01 * a20 - a00 * a21;
+    const float cofactor22 = a00 * a11 - a01 * a10;
+
+    const float determinant = a00 * cofactor00 + a01 * cofactor10 + a02 * cofactor20;
+    if (std::abs(determinant) <= kViewportZoomRayEpsilon) {
+        return renderer::scene_contract::math::makeIdentity();
+    }
+
+    const float inverseDeterminant = 1.0F / determinant;
+    renderer::scene_contract::Mat4f inverse = renderer::scene_contract::math::makeIdentity();
+    inverse.elements[0] = cofactor00 * inverseDeterminant;
+    inverse.elements[4] = cofactor01 * inverseDeterminant;
+    inverse.elements[8] = cofactor02 * inverseDeterminant;
+    inverse.elements[1] = cofactor10 * inverseDeterminant;
+    inverse.elements[5] = cofactor11 * inverseDeterminant;
+    inverse.elements[9] = cofactor12 * inverseDeterminant;
+    inverse.elements[2] = cofactor20 * inverseDeterminant;
+    inverse.elements[6] = cofactor21 * inverseDeterminant;
+    inverse.elements[10] = cofactor22 * inverseDeterminant;
+
+    const renderer::scene_contract::Vec3f translation {
+        matrix.elements[12],
+        matrix.elements[13],
+        matrix.elements[14]
+    };
+    const auto inverseTranslation = transformVector(
+        inverse,
+        {-translation.x, -translation.y, -translation.z});
+    inverse.elements[12] = inverseTranslation.x;
+    inverse.elements[13] = inverseTranslation.y;
+    inverse.elements[14] = inverseTranslation.z;
+    return inverse;
+}
+
+bool intersectRaySpherePrimitive(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::Vec3f& center,
+    float radius,
+    float& hitDistance)
+{
+    const auto offset = renderer::scene_contract::math::subtract(rayOrigin, center);
+    const float b = 2.0F * renderer::scene_contract::math::dot(rayDirection, offset);
+    const float c = renderer::scene_contract::math::dot(offset, offset) - radius * radius;
+    const float discriminant = b * b - 4.0F * c;
+    if (discriminant < 0.0F) {
+        return false;
+    }
+
+    const float sqrtDiscriminant = std::sqrt(discriminant);
+    const float nearDistance = (-b - sqrtDiscriminant) * 0.5F;
+    const float farDistance = (-b + sqrtDiscriminant) * 0.5F;
+    const float distance = nearDistance >= 0.0F ? nearDistance : farDistance;
+    if (distance < 0.0F) {
+        return false;
+    }
+
+    hitDistance = distance;
+    return true;
+}
+
+bool intersectRayBoxPrimitive(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::Vec3f& minimum,
+    const renderer::scene_contract::Vec3f& maximum,
+    float& hitDistance)
+{
+    renderer::scene_contract::Aabb bounds;
+    bounds.valid = true;
+    bounds.min = minimum;
+    bounds.max = maximum;
+    return intersectRayAabb(rayOrigin, rayDirection, bounds, hitDistance);
+}
+
+bool intersectRayCylinderPrimitive(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::scene_contract::Vec3f& axisStart,
+    const renderer::scene_contract::Vec3f& axisEnd,
+    float radius,
+    float& hitDistance)
+{
+    const auto axis = renderer::scene_contract::math::subtract(axisEnd, axisStart);
+    const float axisLength = renderer::scene_contract::math::length(axis);
+    if (axisLength <= kViewportZoomRayEpsilon || radius <= 0.0F) {
+        return false;
+    }
+
+    const auto axisDirection = scaleVec3(axis, 1.0F / axisLength);
+    const auto offset = renderer::scene_contract::math::subtract(rayOrigin, axisStart);
+    const float directionParallel = renderer::scene_contract::math::dot(rayDirection, axisDirection);
+    const float offsetParallel = renderer::scene_contract::math::dot(offset, axisDirection);
+    const auto directionPerpendicular = renderer::scene_contract::math::subtract(
+        rayDirection,
+        scaleVec3(axisDirection, directionParallel));
+    const auto offsetPerpendicular = renderer::scene_contract::math::subtract(
+        offset,
+        scaleVec3(axisDirection, offsetParallel));
+
+    const float a = renderer::scene_contract::math::dot(directionPerpendicular, directionPerpendicular);
+    const float b = 2.0F * renderer::scene_contract::math::dot(directionPerpendicular, offsetPerpendicular);
+    const float c = renderer::scene_contract::math::dot(offsetPerpendicular, offsetPerpendicular) - radius * radius;
+
+    float nearestDistance = std::numeric_limits<float>::max();
+    bool hit = false;
+
+    if (a > kViewportZoomRayEpsilon) {
+        const float discriminant = b * b - 4.0F * a * c;
+        if (discriminant >= 0.0F) {
+            const float sqrtDiscriminant = std::sqrt(discriminant);
+            const std::array<float, 2> candidates = {{
+                (-b - sqrtDiscriminant) / (2.0F * a),
+                (-b + sqrtDiscriminant) / (2.0F * a)
+            }};
+            for (const float candidate : candidates) {
+                if (candidate < 0.0F) {
+                    continue;
+                }
+
+                const float axisDistance = offsetParallel + directionParallel * candidate;
+                if (axisDistance < 0.0F || axisDistance > axisLength) {
+                    continue;
+                }
+
+                nearestDistance = std::min(nearestDistance, candidate);
+                hit = true;
+            }
+        }
+    }
+
+    if (std::abs(directionParallel) > kViewportZoomRayEpsilon) {
+        const std::array<float, 2> capOffsets = {{0.0F, axisLength}};
+        for (const float capOffset : capOffsets) {
+            const float candidate = (capOffset - offsetParallel) / directionParallel;
+            if (candidate < 0.0F) {
+                continue;
+            }
+
+            const auto candidatePoint = renderer::scene_contract::math::add(
+                offset,
+                scaleVec3(rayDirection, candidate));
+            const auto capCenter = scaleVec3(axisDirection, capOffset);
+            const auto radialVector = renderer::scene_contract::math::subtract(candidatePoint, capCenter);
+            const auto radialPerpendicular = renderer::scene_contract::math::subtract(
+                radialVector,
+                scaleVec3(axisDirection, renderer::scene_contract::math::dot(radialVector, axisDirection)));
+            if (renderer::scene_contract::math::dot(radialPerpendicular, radialPerpendicular)
+                > radius * radius) {
+                continue;
+            }
+
+            nearestDistance = std::min(nearestDistance, candidate);
+            hit = true;
+        }
+    }
+
+    if (!hit) {
+        return false;
+    }
+
+    hitDistance = nearestDistance;
+    return true;
+}
+
+bool hasEnabledNonPrimitiveFeatures(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    for (const auto& feature : descriptor.features) {
+        if (feature.kind != renderer::parametric_model::FeatureKind::primitive && feature.enabled) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool intersectRayParametricPrimitive(
+    const renderer::scene_contract::Vec3f& rayOrigin,
+    const renderer::scene_contract::Vec3f& rayDirection,
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor,
+    const renderer::scene_contract::Mat4f& world,
+    float& hitDistance)
+{
+    if (hasEnabledNonPrimitiveFeatures(descriptor)) {
+        return false;
+    }
+
+    const auto inverseWorld = invertAffineTransform(world);
+    const auto localOrigin = transformPoint(inverseWorld, rayOrigin);
+    const auto localDirectionVector = transformVector(inverseWorld, rayDirection);
+    const float localDirectionLength = renderer::scene_contract::math::length(localDirectionVector);
+    if (localDirectionLength <= kViewportZoomRayEpsilon) {
+        return false;
+    }
+
+    const auto localDirection = scaleVec3(localDirectionVector, 1.0F / localDirectionLength);
+
+    const auto primitiveFeature = std::find_if(
+        descriptor.features.begin(),
+        descriptor.features.end(),
+        [](const renderer::parametric_model::FeatureDescriptor& feature) {
+            return feature.kind == renderer::parametric_model::FeatureKind::primitive && feature.enabled;
+        });
+    if (primitiveFeature == descriptor.features.end()) {
+        return false;
+    }
+
+    float localHitDistance = 0.0F;
+    bool hit = false;
+    switch (primitiveFeature->primitive.kind) {
+    case renderer::parametric_model::PrimitiveKind::box: {
+        const auto& box = primitiveFeature->primitive.box;
+        renderer::scene_contract::Vec3f minimum {};
+        renderer::scene_contract::Vec3f maximum {};
+        if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::corner_points) {
+            const auto cornerStart = resolveDescriptorPointNode(descriptor, box.cornerStart, {});
+            const auto cornerEnd = resolveDescriptorPointNode(descriptor, box.cornerEnd, {});
+            minimum = {
+                std::min(cornerStart.x, cornerEnd.x),
+                std::min(cornerStart.y, cornerEnd.y),
+                std::min(cornerStart.z, cornerEnd.z)
+            };
+            maximum = {
+                std::max(cornerStart.x, cornerEnd.x),
+                std::max(cornerStart.y, cornerEnd.y),
+                std::max(cornerStart.z, cornerEnd.z)
+            };
+        } else {
+            const auto center = resolveDescriptorPointNode(descriptor, box.center, descriptor.metadata.pivot);
+            renderer::scene_contract::Vec3f halfExtents {
+                box.width * 0.5F,
+                box.height * 0.5F,
+                box.depth * 0.5F
+            };
+            if (box.constructionMode == renderer::parametric_model::BoxSpec::ConstructionMode::center_corner_point) {
+                const auto cornerPoint = resolveDescriptorPointNode(descriptor, box.cornerPoint, center);
+                halfExtents = {
+                    std::abs(cornerPoint.x - center.x),
+                    std::abs(cornerPoint.y - center.y),
+                    std::abs(cornerPoint.z - center.z)
+                };
+            }
+            minimum = renderer::scene_contract::math::subtract(center, halfExtents);
+            maximum = renderer::scene_contract::math::add(center, halfExtents);
+        }
+        hit = intersectRayBoxPrimitive(localOrigin, localDirection, minimum, maximum, localHitDistance);
+        break;
+    }
+    case renderer::parametric_model::PrimitiveKind::cylinder: {
+        const auto& cylinder = primitiveFeature->primitive.cylinder;
+        renderer::scene_contract::Vec3f axisStart {};
+        renderer::scene_contract::Vec3f axisEnd {};
+        float radius = cylinder.radius;
+        if (cylinder.constructionMode
+            == renderer::parametric_model::CylinderSpec::ConstructionMode::axis_endpoints_radius) {
+            axisStart = resolveDescriptorPointNode(descriptor, cylinder.axisStart, descriptor.metadata.pivot);
+            axisEnd = resolveDescriptorPointNode(descriptor, cylinder.axisEnd, descriptor.metadata.pivot);
+        } else {
+            const auto center = resolveDescriptorPointNode(descriptor, cylinder.center, descriptor.metadata.pivot);
+            if (cylinder.constructionMode
+                == renderer::parametric_model::CylinderSpec::ConstructionMode::center_radius_point_height) {
+                const auto radiusPoint = resolveDescriptorPointNode(descriptor, cylinder.radiusPoint, center);
+                radius = radiusInCylinderPlane(radiusPoint, center);
+            }
+            const renderer::scene_contract::Vec3f halfAxis {0.0F, cylinder.height * 0.5F, 0.0F};
+            axisStart = renderer::scene_contract::math::subtract(center, halfAxis);
+            axisEnd = renderer::scene_contract::math::add(center, halfAxis);
+        }
+        hit = intersectRayCylinderPrimitive(localOrigin, localDirection, axisStart, axisEnd, radius, localHitDistance);
+        break;
+    }
+    case renderer::parametric_model::PrimitiveKind::sphere: {
+        const auto& sphere = primitiveFeature->primitive.sphere;
+        renderer::scene_contract::Vec3f center = resolveDescriptorPointNode(
+            descriptor,
+            sphere.center,
+            descriptor.metadata.pivot);
+        float radius = sphere.radius;
+        if (sphere.constructionMode == renderer::parametric_model::SphereSpec::ConstructionMode::center_surface_point) {
+            const auto surfacePoint = resolveDescriptorPointNode(descriptor, sphere.surfacePoint, center);
+            radius = renderer::scene_contract::math::length(
+                renderer::scene_contract::math::subtract(surfacePoint, center));
+        } else if (sphere.constructionMode
+            == renderer::parametric_model::SphereSpec::ConstructionMode::diameter_points) {
+            const auto diameterStart = resolveDescriptorPointNode(descriptor, sphere.diameterStart, center);
+            const auto diameterEnd = resolveDescriptorPointNode(descriptor, sphere.diameterEnd, center);
+            center = midpoint(diameterStart, diameterEnd);
+            radius = renderer::scene_contract::math::length(
+                renderer::scene_contract::math::subtract(diameterEnd, diameterStart)) * 0.5F;
+        }
+        hit = intersectRaySpherePrimitive(localOrigin, localDirection, center, radius, localHitDistance);
+        break;
+    }
+    }
+
+    if (!hit) {
+        return false;
+    }
+
+    const auto localHitPoint = renderer::scene_contract::math::add(
+        localOrigin,
+        scaleVec3(localDirection, localHitDistance));
+    const auto worldHitPoint = transformPoint(world, localHitPoint);
+    hitDistance = renderer::scene_contract::math::length(
+        renderer::scene_contract::math::subtract(worldHitPoint, rayOrigin));
+    return true;
 }
 
 bool intersectRayTriangle(
@@ -619,6 +1408,79 @@ bool intersectRayMesh(
     return hit;
 }
 
+bool intersectProjectedMesh(
+    const renderer::scene_contract::MeshData& mesh,
+    const renderer::scene_contract::Mat4f& world,
+    const renderer::scene_contract::CameraData& camera,
+    int viewportWidth,
+    int viewportHeight,
+    const QPointF& viewportPosition,
+    float& hitDepth)
+{
+    const auto viewProjection = renderer::scene_contract::math::multiply(camera.projection, camera.view);
+    const auto worldViewProjection = renderer::scene_contract::math::multiply(viewProjection, world);
+
+    bool hit = false;
+    float nearestDepth = std::numeric_limits<float>::max();
+    for (std::size_t index = 0; index + 2U < mesh.indices.size(); index += 3U) {
+        const auto index0 = mesh.indices[index];
+        const auto index1 = mesh.indices[index + 1U];
+        const auto index2 = mesh.indices[index + 2U];
+        if (index0 >= mesh.vertices.size() || index1 >= mesh.vertices.size() || index2 >= mesh.vertices.size()) {
+            continue;
+        }
+
+        const auto clip0 = transformPoint4(worldViewProjection, mesh.vertices[index0].position);
+        const auto clip1 = transformPoint4(worldViewProjection, mesh.vertices[index1].position);
+        const auto clip2 = transformPoint4(worldViewProjection, mesh.vertices[index2].position);
+        const auto projected0 = projectClipVertexToScreen(clip0, viewportWidth, viewportHeight);
+        const auto projected1 = projectClipVertexToScreen(clip1, viewportWidth, viewportHeight);
+        const auto projected2 = projectClipVertexToScreen(clip2, viewportWidth, viewportHeight);
+        if (!projected0.visible || !projected1.visible || !projected2.visible) {
+            continue;
+        }
+
+        float barycentric0 = 0.0F;
+        float barycentric1 = 0.0F;
+        float barycentric2 = 0.0F;
+        if (!pointInProjectedTriangle(
+                viewportPosition,
+                projected0,
+                projected1,
+                projected2,
+                barycentric0,
+                barycentric1,
+                barycentric2)) {
+            continue;
+        }
+
+        const float reciprocalW =
+            barycentric0 / projected0.clipW
+            + barycentric1 / projected1.clipW
+            + barycentric2 / projected2.clipW;
+        if (std::abs(reciprocalW) <= kViewportZoomRayEpsilon) {
+            continue;
+        }
+
+        const float interpolatedDepth =
+            (barycentric0 * projected0.ndcDepth / projected0.clipW
+                + barycentric1 * projected1.ndcDepth / projected1.clipW
+                + barycentric2 * projected2.ndcDepth / projected2.clipW)
+            / reciprocalW;
+        if (interpolatedDepth < nearestDepth) {
+            nearestDepth = interpolatedDepth;
+            hit = true;
+        }
+    }
+
+    if (!hit) {
+        return false;
+    }
+
+    hitDepth = nearestDepth;
+    return true;
+}
+
 renderer::render_gl::ProcAddress resolveGlProc(const char* name, void* userData) {
     (void)userData;
     auto* context = QOpenGLContext::currentContext();
@@ -633,11 +1495,15 @@ renderer::scene_contract::TransformData makeSceneTransform(
     float offsetX,
     float offsetY,
     float offsetZ,
+    const renderer::scene_contract::Vec3f& pivot,
     float scaleValue,
     float speedMultiplier)
 {
     const float animatedAngle = angleRadians * speedMultiplier;
     const auto translation = renderer::scene_contract::math::makeTranslation(offsetX, offsetY, offsetZ);
+    const auto pivotTranslation = renderer::scene_contract::math::makeTranslation(pivot.x, pivot.y, pivot.z);
+    const auto inversePivotTranslation =
+        renderer::scene_contract::math::makeTranslation(-pivot.x, -pivot.y, -pivot.z);
     const auto rotationY = renderer::scene_contract::math::makeRotationY(animatedAngle);
     const auto rotationX = renderer::scene_contract::math::makeRotationX(animatedAngle * 0.35F);
     const auto scale = renderer::scene_contract::math::makeScale(scaleValue, scaleValue, scaleValue);
@@ -645,13 +1511,19 @@ renderer::scene_contract::TransformData makeSceneTransform(
     renderer::scene_contract::TransformData transform;
     transform.world = renderer::scene_contract::math::multiply(
         translation,
-        renderer::scene_contract::math::multiply(rotationY, renderer::scene_contract::math::multiply(rotationX, scale)));
+        renderer::scene_contract::math::multiply(
+            pivotTranslation,
+            renderer::scene_contract::math::multiply(
+                rotationY,
+                renderer::scene_contract::math::multiply(
+                    rotationX,
+                    renderer::scene_contract::math::multiply(scale, inversePivotTranslation)))));
     return transform;
 }
 
 renderer::scene_contract::RenderableItem makeItem() {
     renderer::scene_contract::RenderableItem item;
-    item.transform = makeSceneTransform(0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F);
+    item.transform = makeSceneTransform(0.0F, 0.0F, 0.0F, 0.0F, {}, 1.0F, 1.0F);
     return item;
 }
 
@@ -788,8 +1660,94 @@ void ViewerWindow::bindControlPanelSignals() {
             {x, y, z});
         syncControlPanel();
     });
-    connect(controlPanel_, &ViewerControlPanel::objectAddRequested, this, [this](int primitiveKind) {
-        viewport_->addObject(static_cast<renderer::parametric_model::PrimitiveKind>(primitiveKind));
+    connect(controlPanel_, &ViewerControlPanel::parametricBoxAddRequested, this, [this](
+                int constructionMode,
+                float width,
+                float height,
+                float depth,
+                float centerX,
+                float centerY,
+                float centerZ,
+                float cornerPointX,
+                float cornerPointY,
+                float cornerPointZ,
+                float cornerStartX,
+                float cornerStartY,
+                float cornerStartZ,
+                float cornerEndX,
+                float cornerEndY,
+                float cornerEndZ) {
+        viewer_ui::AddBoxModelInput input;
+        input.constructionMode =
+            static_cast<renderer::parametric_model::BoxSpec::ConstructionMode>(constructionMode);
+        input.width = width;
+        input.height = height;
+        input.depth = depth;
+        input.center = {centerX, centerY, centerZ};
+        input.cornerPoint = {cornerPointX, cornerPointY, cornerPointZ};
+        input.cornerStart = {cornerStartX, cornerStartY, cornerStartZ};
+        input.cornerEnd = {cornerEndX, cornerEndY, cornerEndZ};
+        viewport_->addParametricObject(viewer_ui::ParametricModelAddAdapter::makeBox(input));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::parametricCylinderAddRequested, this, [this](
+                int constructionMode,
+                float radius,
+                float height,
+                int segments,
+                float centerX,
+                float centerY,
+                float centerZ,
+                float radiusPointX,
+                float radiusPointY,
+                float radiusPointZ,
+                float axisStartX,
+                float axisStartY,
+                float axisStartZ,
+                float axisEndX,
+                float axisEndY,
+                float axisEndZ) {
+        viewer_ui::AddCylinderModelInput input;
+        input.constructionMode =
+            static_cast<renderer::parametric_model::CylinderSpec::ConstructionMode>(constructionMode);
+        input.radius = radius;
+        input.height = height;
+        input.segments = static_cast<std::uint32_t>(segments);
+        input.center = {centerX, centerY, centerZ};
+        input.radiusPoint = {radiusPointX, radiusPointY, radiusPointZ};
+        input.axisStart = {axisStartX, axisStartY, axisStartZ};
+        input.axisEnd = {axisEndX, axisEndY, axisEndZ};
+        viewport_->addParametricObject(viewer_ui::ParametricModelAddAdapter::makeCylinder(input));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::parametricSphereAddRequested, this, [this](
+                int constructionMode,
+                float radius,
+                int slices,
+                int stacks,
+                float centerX,
+                float centerY,
+                float centerZ,
+                float surfacePointX,
+                float surfacePointY,
+                float surfacePointZ,
+                float diameterStartX,
+                float diameterStartY,
+                float diameterStartZ,
+                float diameterEndX,
+                float diameterEndY,
+                float diameterEndZ) {
+        viewer_ui::AddSphereModelInput input;
+        input.constructionMode =
+            static_cast<renderer::parametric_model::SphereSpec::ConstructionMode>(constructionMode);
+        input.radius = radius;
+        input.slices = static_cast<std::uint32_t>(slices);
+        input.stacks = static_cast<std::uint32_t>(stacks);
+        input.center = {centerX, centerY, centerZ};
+        input.surfacePoint = {surfacePointX, surfacePointY, surfacePointZ};
+        input.diameterStart = {diameterStartX, diameterStartY, diameterStartZ};
+        input.diameterEnd = {diameterEndX, diameterEndY, diameterEndZ};
+        viewport_->addParametricObject(viewer_ui::ParametricModelAddAdapter::makeSphere(input));
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::deleteSelectedObjectRequested, this, [this]() {
@@ -797,21 +1755,41 @@ void ViewerWindow::bindControlPanelSignals() {
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::objectSelectionChanged, this, [this](int objectId) {
+        viewport_->recordOperationLog(
+            ViewerControlPanel::OperationLogType::panel,
+            QStringLiteral("panel objectSelectionChanged object:%1").arg(objectId));
         viewport_->setSelectedObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::objectActivationRequested, this, [this](int objectId) {
+        viewport_->recordOperationLog(
+            ViewerControlPanel::OperationLogType::panel,
+            QStringLiteral("panel objectActivationRequested object:%1").arg(objectId));
         viewport_->setActiveObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::featureSelectionChanged, this, [this](int objectId, int featureId) {
+        viewport_->recordOperationLog(
+            ViewerControlPanel::OperationLogType::panel,
+            QStringLiteral("panel featureSelectionChanged object:%1 feature:%2")
+                .arg(objectId)
+                .arg(featureId));
         viewport_->setSelectedObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
         viewport_->setSelectedFeature(static_cast<renderer::parametric_model::ParametricFeatureId>(featureId));
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::featureActivationRequested, this, [this](int objectId, int featureId) {
+        viewport_->recordOperationLog(
+            ViewerControlPanel::OperationLogType::panel,
+            QStringLiteral("panel featureActivationRequested object:%1 feature:%2")
+                .arg(objectId)
+                .arg(featureId));
         viewport_->setActiveObject(static_cast<renderer::parametric_model::ParametricObjectId>(objectId));
         viewport_->setActiveFeature(static_cast<renderer::parametric_model::ParametricFeatureId>(featureId));
+        syncControlPanel();
+    });
+    connect(controlPanel_, &ViewerControlPanel::operationLogClearRequested, this, [this]() {
+        viewport_->clearOperationLog();
         syncControlPanel();
     });
     connect(controlPanel_, &ViewerControlPanel::focusSelectedObjectRequested, this, [this]() {
@@ -1076,7 +2054,7 @@ void ViewerWindow::Viewport::applySphereFocusPreset() {
     sceneObjects_[1].rotationSpeed = 0.0F;
 
     sceneObjects_[2].visible = true;
-    sceneObjects_[2].rotationSpeed = 1.75F;
+    sceneObjects_[2].rotationSpeed = 0.0F;
     sceneObjects_[2].materialData.baseColor = {0.45F, 0.86F, 0.78F, 1.0F};
     cameraController_.setOrbitCenter({
         sceneObjects_[2].offsetX,
@@ -2193,11 +3171,26 @@ void ViewerWindow::Viewport::setObjectNodePosition(
 }
 
 void ViewerWindow::Viewport::addObject(renderer::parametric_model::PrimitiveKind kind) {
+    addParametricObject(makeDefaultParametricObject(makeDefaultPrimitiveDescriptor(kind)));
+}
+
+void ViewerWindow::Viewport::addParametricObject(
+    const renderer::parametric_model::ParametricObjectDescriptor& descriptor)
+{
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::model,
+        QStringLiteral("addParametricObject kind:%1 featureCount:%2")
+            .arg(static_cast<int>(descriptor.metadata.objectKind))
+            .arg(static_cast<int>(descriptor.features.size())));
     SceneObject sceneObject;
     const std::size_t newObjectIndex = sceneObjects_.size();
-    const auto defaults = makeDynamicSceneObjectDefaults(kind, newObjectIndex);
+    const auto defaults = makeDynamicSceneObjectDefaults(
+        descriptor.metadata.objectKind,
+        newObjectIndex);
 
-    sceneObject.parametricObjectDescriptor = makeDefaultParametricObject(makeDefaultPrimitiveDescriptor(kind));
+    sceneObject.parametricObjectDescriptor = descriptor;
+    sceneObject.parametricObjectDescriptor.metadata.pivot =
+        parametricObjectPivot(sceneObject.parametricObjectDescriptor);
     sceneObject.meshData = buildParametricMeshWithDiagnostics(sceneObject.parametricObjectDescriptor);
     sceneObject.materialData.baseColor = defaults.color;
     sceneObject.offsetX = defaults.offsetX;
@@ -2221,6 +3214,11 @@ void ViewerWindow::Viewport::addObject(renderer::parametric_model::PrimitiveKind
     selectionState_.selectedFeatureId = firstFeatureIdForObject(selectionState_.selectedObjectId);
     selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
     normalizeSelectionState();
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("addParametricObject selectedObject:%1 selectedFeature:%2")
+            .arg(selectionState_.selectedObjectId)
+            .arg(selectionState_.selectedFeatureId));
     markModelChanged(model_change_view::ChangeKind::geometry_or_transform);
     processPendingModelChange();
     update();
@@ -2264,38 +3262,86 @@ void ViewerWindow::Viewport::removeSelectedObject() {
 
 void ViewerWindow::Viewport::setSelectedObject(renderer::parametric_model::ParametricObjectId objectId) {
     if (findObjectIndexById(objectId) < 0) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::selection,
+            QStringLiteral("setSelectedObject rejected: object:%1 not found").arg(objectId));
         return;
     }
 
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("setSelectedObject object:%1 previous:%2")
+            .arg(objectId)
+            .arg(selectionState_.selectedObjectId));
     selectionState_.selectedObjectId = objectId;
     normalizeSelectionState();
 }
 
 void ViewerWindow::Viewport::setActiveObject(renderer::parametric_model::ParametricObjectId objectId) {
     if (findObjectIndexById(objectId) < 0) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::selection,
+            QStringLiteral("setActiveObject rejected: object:%1 not found").arg(objectId));
         return;
     }
 
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("setActiveObject object:%1 previous:%2")
+            .arg(objectId)
+            .arg(selectionState_.activeObjectId));
     selectionState_.activeObjectId = objectId;
     normalizeSelectionState();
 }
 
 void ViewerWindow::Viewport::setSelectedFeature(renderer::parametric_model::ParametricFeatureId featureId) {
     if (!featureBelongsToObject(selectionState_.selectedObjectId, featureId)) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::selection,
+            QStringLiteral("setSelectedFeature rejected: feature:%1 does not belong to selected object:%2")
+                .arg(featureId)
+                .arg(selectionState_.selectedObjectId));
         return;
     }
 
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("setSelectedFeature feature:%1 for selected object:%2")
+            .arg(featureId)
+            .arg(selectionState_.selectedObjectId));
     selectionState_.selectedFeatureId = featureId;
     normalizeSelectionState();
 }
 
 void ViewerWindow::Viewport::setActiveFeature(renderer::parametric_model::ParametricFeatureId featureId) {
     if (!featureBelongsToObject(selectionState_.activeObjectId, featureId)) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::selection,
+            QStringLiteral("setActiveFeature rejected: feature:%1 does not belong to active object:%2")
+                .arg(featureId)
+                .arg(selectionState_.activeObjectId));
         return;
     }
 
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("setActiveFeature feature:%1 for active object:%2")
+            .arg(featureId)
+            .arg(selectionState_.activeObjectId));
     selectionState_.activeFeatureId = featureId;
     normalizeSelectionState();
+}
+
+void ViewerWindow::Viewport::recordOperationLog(
+    ViewerControlPanel::OperationLogType type,
+    const QString& message)
+{
+    appendOperationLog(type, message);
+}
+
+void ViewerWindow::Viewport::clearOperationLog() {
+    operationLogs_.clear();
+    nextOperationLogSequence_ = 1U;
 }
 
 void ViewerWindow::Viewport::focusSelectedObject() {
@@ -2332,167 +3378,22 @@ ViewerControlPanel::CameraPanelState ViewerWindow::Viewport::cameraPanelState() 
 
 ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const {
     ViewerControlPanel::PanelState state;
-    state.objects.resize(sceneObjects_.size());
+    state.objects.reserve(sceneObjects_.size());
 
     for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
-        auto& objectState = state.objects[index];
-        const auto& descriptor = sceneObjects_[index].parametricObjectDescriptor;
-        objectState.id = descriptor.metadata.id;
-        objectState.primitiveKind = descriptor.metadata.objectKind;
-        const auto* primitive = findObjectPrimitive(descriptor);
-        if (primitive != nullptr) {
-            objectState.primitive = *primitive;
-        }
-        objectState.nodes = descriptor.nodes;
-        objectState.visible = objectVisible(index);
-        objectState.rotationSpeed = objectRotationSpeed(index);
-        objectState.color = objectColor(index);
-        objectState.bounds = objectLocalBounds(index);
-
-        const auto* mirrorFeature = findObjectFeature(
-            descriptor,
-            renderer::parametric_model::FeatureKind::mirror);
-        if (mirrorFeature != nullptr) {
-            objectState.mirror.enabled = mirrorFeature->enabled;
-            objectState.mirror.axis = static_cast<int>(mirrorFeature->mirror.axis);
-            objectState.mirror.planeOffset = mirrorFeature->mirror.planeOffset;
-        }
-
-        const auto* linearArrayFeature = findObjectFeature(
-            descriptor,
-            renderer::parametric_model::FeatureKind::linear_array);
-        if (linearArrayFeature != nullptr) {
-            objectState.linearArray.enabled = linearArrayFeature->enabled;
-            objectState.linearArray.count = static_cast<int>(linearArrayFeature->linearArray.count);
-            objectState.linearArray.offset = linearArrayFeature->linearArray.offset;
-        }
-
-        const auto units = renderer::parametric_model::ParametricModelStructure::describeUnits(descriptor);
-        objectState.features.clear();
-        objectState.features.reserve(units.size());
-        for (const auto& unit : units) {
-            const auto* feature = findObjectFeatureById(descriptor, unit.featureId);
-            if (feature == nullptr) {
-                continue;
-            }
-            objectState.features.push_back({
-                feature->id,
-                unit.id,
-                feature->kind,
-                feature->enabled
-            });
-        }
-        objectState.units.clear();
-        objectState.units.reserve(units.size());
-        for (const auto& unit : units) {
-            objectState.units.push_back({
-                unit.id,
-                unit.featureId,
-                unit.kind,
-                unit.role,
-                unit.constructionKind,
-                unit.enabled
-            });
-        }
-
-        const auto unitInputs = renderer::parametric_model::ParametricModelStructure::describeUnitInputs(descriptor);
-        objectState.unitInputs.clear();
-        objectState.unitInputs.reserve(unitInputs.size());
-        for (const auto& input : unitInputs) {
-            objectState.unitInputs.push_back({
-                input.unitId,
-                input.featureId,
-                input.kind,
-                input.semantic,
-                input.nodeId
-            });
-        }
-
-        const auto nodeUsages = renderer::parametric_model::ParametricModelStructure::describeNodeUsages(descriptor);
-        objectState.nodeUsages.clear();
-        objectState.nodeUsages.reserve(nodeUsages.size());
-        for (const auto& usage : nodeUsages) {
-            objectState.nodeUsages.push_back({
-                usage.nodeId,
-                usage.unitId,
-                usage.featureId,
-                usage.semantic
-            });
-        }
-
-        const auto constructionLinks =
-            renderer::parametric_model::ParametricModelStructure::describeConstructionLinks(descriptor);
-        objectState.constructionLinks.clear();
-        objectState.constructionLinks.reserve(constructionLinks.size());
-        for (const auto& link : constructionLinks) {
-            objectState.constructionLinks.push_back({
-                link.unitId,
-                link.featureId,
-                link.constructionKind,
-                link.startNodeId,
-                link.endNodeId,
-                link.startSemantic,
-                link.endSemantic
-            });
-        }
-
-        const auto derivedParameters =
-            renderer::parametric_model::ParametricModelStructure::describeDerivedParameters(descriptor);
-        objectState.derivedParameters.clear();
-        objectState.derivedParameters.reserve(derivedParameters.size());
-        for (const auto& parameter : derivedParameters) {
-            objectState.derivedParameters.push_back({
-                parameter.unitId,
-                parameter.featureId,
-                parameter.constructionKind,
-                parameter.semantic,
-                parameter.value,
-                parameter.referenceNodeId,
-                parameter.sourceNodeId
-            });
-        }
-
-        const auto evaluationResult = renderer::parametric_model::ParametricEvaluator::evaluate(descriptor);
-        objectState.evaluationSummary.succeeded = evaluationResult.succeeded;
-        objectState.evaluationSummary.vertexCount = evaluationResult.mesh.vertices.size();
-        objectState.evaluationSummary.indexCount = evaluationResult.mesh.indices.size();
-        objectState.evaluationSummary.diagnosticCount = evaluationResult.diagnostics.size();
-        objectState.evaluationSummary.warningCount = 0U;
-        objectState.evaluationSummary.errorCount = 0U;
-
-        const auto unitEvaluations =
-            renderer::parametric_model::ParametricModelStructure::describeUnitEvaluations(
-                descriptor,
-                evaluationResult);
-        objectState.unitEvaluations.clear();
-        objectState.unitEvaluations.reserve(unitEvaluations.size());
-        for (const auto& evaluation : unitEvaluations) {
-            objectState.unitEvaluations.push_back({
-                evaluation.unitId,
-                evaluation.featureId,
-                evaluation.status,
-                evaluation.diagnosticCount,
-                evaluation.warningCount,
-                evaluation.errorCount
-            });
-        }
-
-        objectState.evaluationDiagnostics.clear();
-        objectState.evaluationDiagnostics.reserve(evaluationResult.diagnostics.size());
-        for (const auto& diagnostic : evaluationResult.diagnostics) {
-            if (diagnostic.severity == renderer::parametric_model::EvaluationDiagnosticSeverity::warning) {
-                ++objectState.evaluationSummary.warningCount;
-            } else if (diagnostic.severity == renderer::parametric_model::EvaluationDiagnosticSeverity::error) {
-                ++objectState.evaluationSummary.errorCount;
-            }
-            objectState.evaluationDiagnostics.push_back({
-                diagnostic.severity,
-                diagnostic.code,
-                diagnostic.featureId,
-                diagnostic.nodeId,
-                diagnostic.message
-            });
-        }
+        const auto uiState = viewer_ui::ViewerUiStateAdapter::buildSceneObjectState({
+            sceneObjects_[index].parametricObjectDescriptor,
+            objectVisible(index),
+            objectRotationSpeed(index),
+            objectColor(index),
+            objectLocalBounds(index)
+        });
+        auto objectPanelState = makePanelSceneObjectState(uiState);
+        appendPanelFeatureFields(
+            objectPanelState,
+            viewer_ui::ParametricUiSchemaAdapter::buildObjectFeatureFields(
+                sceneObjects_[index].parametricObjectDescriptor));
+        state.objects.push_back(objectPanelState);
     }
 
     state.lighting.ambientStrength = ambientStrength();
@@ -2502,6 +3403,7 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
     state.selection.activeObjectId = selectionState_.activeObjectId;
     state.selection.selectedFeatureId = selectionState_.selectedFeatureId;
     state.selection.activeFeatureId = selectionState_.activeFeatureId;
+    state.operationLogs = operationLogs_;
     state.modelChangeViewStrategy =
         modelChangeViewStrategy() == model_change_view::ViewStrategy::auto_frame ? 1 : 0;
     return state;
@@ -2509,7 +3411,12 @@ ViewerControlPanel::PanelState ViewerWindow::Viewport::controlPanelState() const
 
 viewport_zoom::AnchorSample ViewerWindow::Viewport::sampleViewportZoomAnchor(const QPointF& viewportPosition) const {
     viewport_zoom::AnchorSample sample;
-    const auto ray = makeViewportRay(cameraController_, width(), height(), viewportPosition);
+    const auto renderViewportPosition = toRenderViewportPosition(viewportPosition);
+    const auto ray = makeViewportRay(
+        cameraController_,
+        renderViewportWidth(),
+        renderViewportHeight(),
+        renderViewportPosition);
     sample.viewportPositionNormalized = ray.viewportPositionNormalized;
     if (!ray.valid) {
         return sample;
@@ -2630,6 +3537,32 @@ renderer::scene_contract::Aabb ViewerWindow::Viewport::objectLocalBounds(int ind
     return sceneObjects_[index].meshData.localBounds;
 }
 
+int ViewerWindow::Viewport::renderViewportWidth() const {
+    if (offscreenTarget_) {
+        return offscreenTarget_->width();
+    }
+
+    return std::max(1, qRound(static_cast<qreal>(width()) * devicePixelRatioF()));
+}
+
+int ViewerWindow::Viewport::renderViewportHeight() const {
+    if (offscreenTarget_) {
+        return offscreenTarget_->height();
+    }
+
+    return std::max(1, qRound(static_cast<qreal>(height()) * devicePixelRatioF()));
+}
+
+QPointF ViewerWindow::Viewport::toRenderViewportPosition(const QPointF& widgetPosition) const {
+    if (width() <= 0 || height() <= 0) {
+        return widgetPosition;
+    }
+
+    const qreal scaleX = static_cast<qreal>(renderViewportWidth()) / static_cast<qreal>(width());
+    const qreal scaleY = static_cast<qreal>(renderViewportHeight()) / static_cast<qreal>(height());
+    return {widgetPosition.x() * scaleX, widgetPosition.y() * scaleY};
+}
+
 ViewerWindow::Viewport::~Viewport() {
     if (context() == nullptr) {
         return;
@@ -2654,7 +3587,7 @@ void ViewerWindow::Viewport::initializeGL() {
     }
 
     rebuildRepositoryItems();
-    cameraController_.setViewportSize(width(), height());
+    cameraController_.setViewportSize(renderViewportWidth(), renderViewportHeight());
     rebuildFramePacket();
 }
 
@@ -2694,7 +3627,7 @@ void ViewerWindow::Viewport::paintGL() {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, defaultFramebufferObject());
     glBlitFramebuffer(
         0, 0, offscreenTarget_->width(), offscreenTarget_->height(),
-        0, 0, width(), height(),
+        0, 0, renderViewportWidth(), renderViewportHeight(),
         GL_COLOR_BUFFER_BIT,
         GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
@@ -2789,16 +3722,34 @@ void ViewerWindow::Viewport::mouseReleaseEvent(QMouseEvent* event) {
             leftButtonTracking_
             && !leftButtonDragged_
             && totalDelta.manhattanLength() <= kViewportClickDragThresholdPixels;
+        const bool wasDragged = leftButtonDragged_;
 
         rotating_ = false;
         leftButtonTracking_ = false;
         leftButtonDragged_ = false;
 
         if (clickSelection) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::selection,
+                QStringLiteral("viewport click selection release pos=(%1,%2)")
+                    .arg(event->pos().x())
+                    .arg(event->pos().y()));
             const int pickedIndex = pickObjectAt(event->localPos());
             if (pickedIndex >= 0) {
                 selectObjectAt(pickedIndex);
+            } else {
+                appendOperationLog(
+                    ViewerControlPanel::OperationLogType::selection,
+                    QStringLiteral("viewport click selection: no object picked"));
             }
+            notifyCameraStateChanged();
+        } else {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::selection,
+                QStringLiteral("viewport left release ignored for selection: dragged=%1 totalDelta=%2")
+                    .arg(wasDragged ? QStringLiteral("true") : QStringLiteral("false"))
+                    .arg(totalDelta.manhattanLength()));
+            notifyCameraStateChanged();
         }
 
         event->accept();
@@ -2868,6 +3819,7 @@ renderer::scene_contract::TransformData ViewerWindow::Viewport::currentObjectTra
         sceneObject.offsetX,
         sceneObject.offsetY,
         sceneObject.offsetZ,
+        parametricObjectPivot(sceneObject.parametricObjectDescriptor),
         sceneObject.scale,
         sceneObject.rotationSpeed);
 }
@@ -2891,6 +3843,21 @@ void ViewerWindow::Viewport::notifyCameraStateChanged() {
     if (cameraStateChangedCallback_) {
         cameraStateChangedCallback_();
     }
+}
+
+void ViewerWindow::Viewport::appendOperationLog(
+    ViewerControlPanel::OperationLogType type,
+    const QString& message)
+{
+    if (operationLogs_.size() >= kMaxOperationLogCount) {
+        operationLogs_.erase(operationLogs_.begin());
+    }
+
+    operationLogs_.push_back({
+        nextOperationLogSequence_++,
+        type,
+        message.toStdString()
+    });
 }
 
 void ViewerWindow::Viewport::refreshViewportZoomState() {
@@ -3123,27 +4090,116 @@ int ViewerWindow::Viewport::findObjectIndexById(renderer::parametric_model::Para
 }
 
 int ViewerWindow::Viewport::pickObjectAt(const QPointF& viewportPosition) {
-    const auto ray = makeViewportRay(cameraController_, width(), height(), viewportPosition);
+    const auto renderViewportPosition = toRenderViewportPosition(viewportPosition);
+    const auto renderWidth = renderViewportWidth();
+    const auto renderHeight = renderViewportHeight();
+    const auto ray = makeViewportRay(
+        cameraController_,
+        renderWidth,
+        renderHeight,
+        renderViewportPosition);
+    const auto camera = cameraController_.buildCameraData();
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::picking,
+        QStringLiteral(
+            "pick begin widget=(%1,%2) render=(%3,%4) renderSize=%5x%6 dpr=%7 objects:%8")
+            .arg(viewportPosition.x(), 0, 'f', 1)
+            .arg(viewportPosition.y(), 0, 'f', 1)
+            .arg(renderViewportPosition.x(), 0, 'f', 1)
+            .arg(renderViewportPosition.y(), 0, 'f', 1)
+            .arg(renderWidth)
+            .arg(renderHeight)
+            .arg(devicePixelRatioF(), 0, 'f', 2)
+            .arg(static_cast<int>(sceneObjects_.size())));
     if (!ray.valid) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::picking,
+            QStringLiteral("pick ray invalid"));
         return -1;
     }
 
     int pickedIndex = -1;
     float pickedDistance = std::numeric_limits<float>::max();
+    int pickedScreenIndex = -1;
+    float pickedScreenDepth = std::numeric_limits<float>::max();
     for (int index = 0; index < static_cast<int>(sceneObjects_.size()); ++index) {
         const auto& sceneObject = sceneObjects_[index];
+        const auto objectId = sceneObject.parametricObjectDescriptor.metadata.id;
         const auto transform = currentObjectTransform(index);
         repository_.updateVisible(sceneObject.itemId, sceneObject.visible);
         repository_.updateVisualState(sceneObject.itemId, currentObjectVisualState(index));
         repository_.updateTransform(sceneObject.itemId, transform);
 
         if (!sceneObject.visible) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::picking,
+                QStringLiteral("pick skip index:%1 object:%2 invisible")
+                    .arg(index)
+                    .arg(objectId));
             continue;
         }
 
         float hitDistance = 0.0F;
         const auto bounds = repository_.rangeData(sceneObject.itemId).worldBounds;
         if (!intersectRayAabb(ray.origin, ray.direction, bounds, hitDistance)) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::picking,
+                QStringLiteral("pick AABB miss index:%1 object:%2 boundsValid:%3")
+                    .arg(index)
+                    .arg(objectId)
+                    .arg(bounds.valid ? QStringLiteral("true") : QStringLiteral("false")));
+            continue;
+        }
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::picking,
+            QStringLiteral("pick AABB hit index:%1 object:%2 distance:%3 min=(%4,%5,%6) max=(%7,%8,%9)")
+                .arg(index)
+                .arg(objectId)
+                .arg(hitDistance, 0, 'f', 4)
+                .arg(bounds.min.x, 0, 'f', 3)
+                .arg(bounds.min.y, 0, 'f', 3)
+                .arg(bounds.min.z, 0, 'f', 3)
+                .arg(bounds.max.x, 0, 'f', 3)
+                .arg(bounds.max.y, 0, 'f', 3)
+                .arg(bounds.max.z, 0, 'f', 3));
+
+        float screenDepth = 0.0F;
+        if (intersectProjectedMesh(
+                sceneObject.meshData,
+                transform.world,
+                camera,
+                renderWidth,
+                renderHeight,
+                renderViewportPosition,
+                screenDepth)) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::picking,
+                QStringLiteral("pick screen hit index:%1 object:%2 depth:%3")
+                    .arg(index)
+                    .arg(objectId)
+                    .arg(screenDepth, 0, 'f', 4));
+            if (screenDepth < pickedScreenDepth) {
+                pickedScreenDepth = screenDepth;
+                pickedScreenIndex = index;
+            }
+        }
+
+        if (intersectRayParametricPrimitive(
+                ray.origin,
+                ray.direction,
+                sceneObject.parametricObjectDescriptor,
+                transform.world,
+                hitDistance)) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::picking,
+                QStringLiteral("pick primitive hit index:%1 object:%2 distance:%3")
+                    .arg(index)
+                    .arg(objectId)
+                    .arg(hitDistance, 0, 'f', 4));
+            if (hitDistance < pickedDistance) {
+                pickedDistance = hitDistance;
+                pickedIndex = index;
+            }
             continue;
         }
 
@@ -3153,27 +4209,71 @@ int ViewerWindow::Viewport::pickObjectAt(const QPointF& viewportPosition) {
                 sceneObject.meshData,
                 transform.world,
                 hitDistance)) {
+            appendOperationLog(
+                ViewerControlPanel::OperationLogType::picking,
+                QStringLiteral("pick mesh miss index:%1 object:%2 after AABB hit")
+                    .arg(index)
+                    .arg(objectId));
             continue;
         }
 
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::picking,
+            QStringLiteral("pick mesh hit index:%1 object:%2 distance:%3")
+                .arg(index)
+                .arg(objectId)
+                .arg(hitDistance, 0, 'f', 4));
         if (hitDistance < pickedDistance) {
             pickedDistance = hitDistance;
             pickedIndex = index;
         }
     }
 
+    if (pickedScreenIndex >= 0) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::picking,
+            QStringLiteral("pick result screen index:%1 depth:%2")
+                .arg(pickedScreenIndex)
+                .arg(pickedScreenDepth, 0, 'f', 4));
+        return pickedScreenIndex;
+    }
+
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::picking,
+        QStringLiteral("pick result index:%1 distance:%2")
+            .arg(pickedIndex)
+            .arg(pickedDistance, 0, 'f', 4));
     return pickedIndex;
 }
 
 void ViewerWindow::Viewport::selectObjectAt(int index) {
     if (index < 0 || index >= static_cast<int>(sceneObjects_.size())) {
+        appendOperationLog(
+            ViewerControlPanel::OperationLogType::selection,
+            QStringLiteral("selectObjectAt rejected: index:%1 out of range").arg(index));
         return;
     }
 
     const auto objectId = sceneObjects_[index].parametricObjectDescriptor.metadata.id;
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("selectObjectAt index:%1 object:%2 previousObject:%3 previousFeature:%4")
+            .arg(index)
+            .arg(objectId)
+            .arg(selectionState_.selectedObjectId)
+            .arg(selectionState_.selectedFeatureId));
     selectionState_.selectedObjectId = objectId;
     selectionState_.activeObjectId = objectId;
+    selectionState_.selectedFeatureId = firstFeatureIdForObject(objectId);
+    selectionState_.activeFeatureId = selectionState_.selectedFeatureId;
     normalizeSelectionState();
+    appendOperationLog(
+        ViewerControlPanel::OperationLogType::selection,
+        QStringLiteral("selectObjectAt result selectedObject:%1 activeObject:%2 selectedFeature:%3 activeFeature:%4")
+            .arg(selectionState_.selectedObjectId)
+            .arg(selectionState_.activeObjectId)
+            .arg(selectionState_.selectedFeatureId)
+            .arg(selectionState_.activeFeatureId));
     notifyCameraStateChanged();
     update();
 }
@@ -3202,6 +4302,13 @@ renderer::parametric_model::ParametricFeatureId ViewerWindow::Viewport::firstFea
     if (features.empty()) {
         return 0U;
     }
+
+    for (const auto& feature : features) {
+        if (feature.kind == renderer::parametric_model::FeatureKind::primitive) {
+            return feature.id;
+        }
+    }
+
     return features.front().id;
 }
 
@@ -3244,6 +4351,7 @@ void ViewerWindow::Viewport::applyParametricObjectDescriptor(
     }
 
     auto normalizedDescriptor = descriptor;
+    normalizedDescriptor.metadata.pivot = parametricObjectPivot(normalizedDescriptor);
     pruneUnreferencedParametricNodes(normalizedDescriptor);
     sceneObjects_[index].parametricObjectDescriptor = normalizedDescriptor;
     normalizeSelectionState();
@@ -3489,7 +4597,7 @@ void ViewerWindow::Viewport::rebuildFramePacket() {
 
     auto scene = repository_.snapshot(cameraController_.buildCameraData());
     scene.light = light_;
-    framePacket_ = assembler_.build(scene, {width(), height()});
+    framePacket_ = assembler_.build(scene, {renderViewportWidth(), renderViewportHeight()});
 }
 
 void ViewerWindow::syncControlPanel() {

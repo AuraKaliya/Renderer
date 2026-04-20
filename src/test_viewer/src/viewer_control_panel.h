@@ -12,7 +12,9 @@ class QLabel;
 class QListWidget;
 class QCheckBox;
 class QDoubleSpinBox;
+class QPlainTextEdit;
 class QPushButton;
+class QVBoxLayout;
 
 #include "camera_control_widget.h"
 #include "lighting_control_widget.h"
@@ -70,6 +72,33 @@ public:
         renderer::parametric_model::ParametricNodeId nodeId = 0U;
     };
 
+    struct ParametricFieldPanelState {
+        renderer::parametric_model::ParametricInputKind kind =
+            renderer::parametric_model::ParametricInputKind::float_value;
+        renderer::parametric_model::ParametricInputSemantic semantic =
+            renderer::parametric_model::ParametricInputSemantic::radius;
+        std::string label;
+        bool editable = true;
+        renderer::parametric_model::ParametricNodeId nodeId = 0U;
+        bool hasNodePosition = false;
+        renderer::scene_contract::Vec3f vectorValue {};
+        float floatValue = 0.0F;
+        int integerValue = 0;
+        int enumValue = 0;
+    };
+
+    struct FeatureFieldsPanelState {
+        renderer::parametric_model::ParametricFeatureId featureId = 0U;
+        renderer::parametric_model::ParametricUnitId unitId = 0U;
+        renderer::parametric_model::FeatureKind featureKind =
+            renderer::parametric_model::FeatureKind::primitive;
+        renderer::parametric_model::ParametricConstructionKind constructionKind =
+            renderer::parametric_model::ParametricConstructionKind::box_center_size;
+        std::string constructionLabel;
+        bool enabled = true;
+        std::vector<ParametricFieldPanelState> fields;
+    };
+
     struct NodeUsagePanelState {
         renderer::parametric_model::ParametricNodeId nodeId = 0U;
         renderer::parametric_model::ParametricUnitId unitId = 0U;
@@ -118,6 +147,20 @@ public:
         std::size_t errorCount = 0U;
     };
 
+    enum class OperationLogType : std::uint8_t {
+        selection,
+        picking,
+        panel,
+        model,
+        camera
+    };
+
+    struct OperationLogPanelState {
+        std::uint32_t sequence = 0U;
+        OperationLogType type = OperationLogType::selection;
+        std::string message;
+    };
+
     struct SceneObjectPanelState {
         renderer::parametric_model::ParametricObjectId id = 0U;
         renderer::parametric_model::PrimitiveKind primitiveKind = renderer::parametric_model::PrimitiveKind::box;
@@ -133,6 +176,7 @@ public:
         std::vector<UnitPanelState> units;
         std::vector<UnitEvaluationPanelState> unitEvaluations;
         std::vector<UnitInputPanelState> unitInputs;
+        std::vector<FeatureFieldsPanelState> featureFields;
         std::vector<NodeUsagePanelState> nodeUsages;
         std::vector<ConstructionLinkPanelState> constructionLinks;
         std::vector<DerivedParameterPanelState> derivedParameters;
@@ -157,6 +201,7 @@ public:
         LightingPanelState lighting {};
         CameraPanelState camera {};
         SelectionPanelState selection {};
+        std::vector<OperationLogPanelState> operationLogs;
         int modelChangeViewStrategy = 0;
     };
 
@@ -178,7 +223,57 @@ signals:
     void objectFeatureRemoveRequested(int index, int featureId);
     void objectFeatureEnabledChanged(int index, int featureId, bool enabled);
     void objectNodePositionChanged(int index, int nodeId, float x, float y, float z);
-    void objectAddRequested(int primitiveKind);
+    void parametricBoxAddRequested(
+        int constructionMode,
+        float width,
+        float height,
+        float depth,
+        float centerX,
+        float centerY,
+        float centerZ,
+        float cornerPointX,
+        float cornerPointY,
+        float cornerPointZ,
+        float cornerStartX,
+        float cornerStartY,
+        float cornerStartZ,
+        float cornerEndX,
+        float cornerEndY,
+        float cornerEndZ);
+    void parametricCylinderAddRequested(
+        int constructionMode,
+        float radius,
+        float height,
+        int segments,
+        float centerX,
+        float centerY,
+        float centerZ,
+        float radiusPointX,
+        float radiusPointY,
+        float radiusPointZ,
+        float axisStartX,
+        float axisStartY,
+        float axisStartZ,
+        float axisEndX,
+        float axisEndY,
+        float axisEndZ);
+    void parametricSphereAddRequested(
+        int constructionMode,
+        float radius,
+        int slices,
+        int stacks,
+        float centerX,
+        float centerY,
+        float centerZ,
+        float surfacePointX,
+        float surfacePointY,
+        float surfacePointZ,
+        float diameterStartX,
+        float diameterStartY,
+        float diameterStartZ,
+        float diameterEndX,
+        float diameterEndY,
+        float diameterEndZ);
     void deleteSelectedObjectRequested();
     void objectSelectionChanged(int objectId);
     void objectActivationRequested(int objectId);
@@ -224,17 +319,26 @@ signals:
     void parametricOverlayModelBoundsChanged(bool visible);
     void parametricOverlayNodePointsChanged(bool visible);
     void parametricOverlayConstructionLinksChanged(bool visible);
+    void operationLogClearRequested();
 
 private:
+    void buildAddModelPage(QWidget* content, QVBoxLayout* contentLayout);
+    void buildScenePage(QWidget* content, QVBoxLayout* contentLayout);
+    void buildInspectorPage(QWidget* content, QVBoxLayout* contentLayout);
+    void buildCameraPage(QWidget* content, QVBoxLayout* contentLayout);
+    void buildDebugPage(QWidget* content, QVBoxLayout* contentLayout);
+    void connectObjectInspectorSignals();
     void setLightingState(float ambientStrength, const renderer::scene_contract::Vec3f& lightDirection);
     void setCameraState(const CameraPanelState& state);
     void refreshObjectExplorer();
     void refreshFeatureExplorer();
     void refreshNodeExplorer();
     void refreshNodeInspector();
+    void refreshFeatureSchemaInspector();
     void refreshObjectInspector();
     void refreshBoundsList();
     void refreshParametricDebugPage();
+    void refreshOperationLogPage();
     void updateFeatureActionState();
     void emitInspectedNodePosition();
     int findObjectIndexById(renderer::parametric_model::ParametricObjectId objectId) const;
@@ -248,6 +352,7 @@ private:
     QListWidget* objectListWidget_ = nullptr;
     QListWidget* featureListWidget_ = nullptr;
     QListWidget* nodeListWidget_ = nullptr;
+    QListWidget* featureFieldListWidget_ = nullptr;
     QListWidget* boundsListWidget_ = nullptr;
     QLabel* evaluationSummaryLabel_ = nullptr;
     QListWidget* parametricBoundsListWidget_ = nullptr;
@@ -258,12 +363,18 @@ private:
     QListWidget* constructionLinkListWidget_ = nullptr;
     QListWidget* derivedParameterListWidget_ = nullptr;
     QListWidget* evaluationDiagnosticListWidget_ = nullptr;
+    QPlainTextEdit* operationLogTextEdit_ = nullptr;
     QLabel* objectSelectionLabel_ = nullptr;
     QLabel* featureSelectionLabel_ = nullptr;
     QCheckBox* featureEnabledCheckBox_ = nullptr;
     QCheckBox* showParametricBoundsCheckBox_ = nullptr;
     QCheckBox* showParametricNodesCheckBox_ = nullptr;
     QCheckBox* showParametricLinksCheckBox_ = nullptr;
+    QCheckBox* showSelectionLogCheckBox_ = nullptr;
+    QCheckBox* showPickingLogCheckBox_ = nullptr;
+    QCheckBox* showPanelLogCheckBox_ = nullptr;
+    QCheckBox* showModelLogCheckBox_ = nullptr;
+    QCheckBox* showCameraLogCheckBox_ = nullptr;
     QDoubleSpinBox* nodeXSpinBox_ = nullptr;
     QDoubleSpinBox* nodeYSpinBox_ = nullptr;
     QDoubleSpinBox* nodeZSpinBox_ = nullptr;
@@ -271,9 +382,6 @@ private:
     QPushButton* deleteSelectedObjectButton_ = nullptr;
     QPushButton* activateFeatureButton_ = nullptr;
     QPushButton* focusSelectedObjectButton_ = nullptr;
-    QPushButton* addBoxObjectButton_ = nullptr;
-    QPushButton* addCylinderObjectButton_ = nullptr;
-    QPushButton* addSphereObjectButton_ = nullptr;
     QPushButton* addMirrorFeatureButton_ = nullptr;
     QPushButton* addLinearArrayFeatureButton_ = nullptr;
     QPushButton* removeFeatureButton_ = nullptr;

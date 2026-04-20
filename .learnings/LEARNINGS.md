@@ -22,3 +22,26 @@ Viewport Zoom 在本项目中的最新语义不是纯屏幕放大，而是独立
 - Tags: viewport-zoom, semantics, correction
 
 ---
+
+## [LRN-20260420-001] correction
+
+**Logged**: 2026-04-20T00:00:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: frontend
+
+### Summary
+When viewport picking looks wrong in the Qt test viewer, verify logical widget coordinates versus render framebuffer coordinates before changing hit-selection strategy.
+
+### Details
+I initially explored a selection-strategy change after mixed hit logs, but the user correctly pointed out the issue pattern matched bounds and picking mismatch instead. In this project, `QOpenGLWidget` paths use both logical widget size and framebuffer render size. If picking rays, zoom anchors, frame assembly, and framebuffer blit do not use the same render-space dimensions, clicks can appear to miss or target the wrong object even when the scene renders normally.
+
+### Suggested Action
+Keep one shared conversion from widget coordinates to render coordinates, and use render viewport dimensions consistently for camera viewport size, ray generation, frame assembly, and framebuffer blit.
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/test_viewer/src/viewer_window.cpp, src/test_viewer/src/viewer_window.h
+- Tags: picking, high-dpi, qopenglwidget, correction
+
+---

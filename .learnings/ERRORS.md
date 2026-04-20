@@ -285,5 +285,10 @@ rg: src/test_viewer/src/*.h: 文件名、目录名或卷标语法不正确。 (o
 ### Metadata
 - Reproducible: yes
 - Related Files: none
+- Recurrence-Count: 2
+- Last-Seen: 2026-04-20
+
+### Recurrence
+- 2026-04-20: Reproduced with `rg -n "..." src\test_viewer\src\viewer_control_panel.*`; switched to explicit file paths.
 
 ---

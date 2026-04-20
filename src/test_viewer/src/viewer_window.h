@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -18,6 +19,7 @@ class QEvent;
 class QWheelEvent;
 class QPointF;
 class QPainter;
+class QString;
 
 #include "orbit_camera_controller.h"
 #include "model_change_view_state.h"
@@ -115,11 +117,17 @@ private:
             renderer::parametric_model::ParametricNodeId nodeId,
             const renderer::scene_contract::Vec3f& position);
         void addObject(renderer::parametric_model::PrimitiveKind kind);
+        void addParametricObject(
+            const renderer::parametric_model::ParametricObjectDescriptor& descriptor);
         void removeSelectedObject();
         void setSelectedObject(renderer::parametric_model::ParametricObjectId objectId);
         void setActiveObject(renderer::parametric_model::ParametricObjectId objectId);
         void setSelectedFeature(renderer::parametric_model::ParametricFeatureId featureId);
         void setActiveFeature(renderer::parametric_model::ParametricFeatureId featureId);
+        void recordOperationLog(
+            ViewerControlPanel::OperationLogType type,
+            const QString& message);
+        void clearOperationLog();
         void focusSelectedObject();
         [[nodiscard]] float nearPlane() const;
         [[nodiscard]] float farPlane() const;
@@ -164,6 +172,9 @@ private:
             const renderer::parametric_model::ParametricObjectDescriptor& descriptor);
         void rebuildObjectMesh(int index);
         void updateSceneTransforms();
+        [[nodiscard]] int renderViewportWidth() const;
+        [[nodiscard]] int renderViewportHeight() const;
+        [[nodiscard]] QPointF toRenderViewportPosition(const QPointF& widgetPosition) const;
         renderer::parametric_model::FeatureDescriptor* ensureObjectFeature(
             renderer::parametric_model::ParametricObjectDescriptor& descriptor,
             renderer::parametric_model::FeatureKind kind);
@@ -225,6 +236,9 @@ private:
             const renderer::scene_contract::TransformData& transform,
             const std::vector<renderer::parametric_model::ParametricNodeUsageDescriptor>& nodeUsages) const;
         void rebuildFramePacket();
+        void appendOperationLog(
+            ViewerControlPanel::OperationLogType type,
+            const QString& message);
 
         struct SceneObject {
             renderer::render_core::SceneRepository::ItemId itemId = 0;
@@ -239,7 +253,7 @@ private:
             float offsetY = 0.0F;
             float offsetZ = 0.0F;
             float scale = 1.0F;
-            float rotationSpeed = 1.0F;
+            float rotationSpeed = 0.0F;
             bool visible = true;
         };
 
@@ -252,6 +266,8 @@ private:
 
         std::vector<SceneObject> sceneObjects_;
         SelectionState selectionState_ {};
+        std::vector<ViewerControlPanel::OperationLogPanelState> operationLogs_;
+        std::uint32_t nextOperationLogSequence_ = 1U;
         renderer::scene_contract::DirectionalLightData light_ {};
         OrbitCameraController cameraController_;
         renderer::render_core::SceneRepository repository_;
